@@ -9,7 +9,7 @@ from datetime import date
 from io import StringIO
 
 # =====================================================
-# MARKET RADAR - FINAL PRO STREAMLIT APP
+# MARKET RADAR - ULTIMATE PRO STREAMLIT APP
 # =====================================================
 
 st.set_page_config(
@@ -92,7 +92,7 @@ def get_history(ticker, period="2y"):
     try:
         df = yf.download(ticker, period=period, auto_adjust=True, progress=False, threads=False)
         if df.empty:
-            raise ValueError("Empty data from yfinance")
+            raise ValueError("Empty data")
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         df.index = pd.to_datetime(df.index)
@@ -335,9 +335,9 @@ def calculate_positions(tx):
             pnl = value - cost if np.isfinite(value) else np.nan
             pnl_pct = (pnl / cost * 100) if cost > 0 and np.isfinite(pnl) else 0
 
-            # שקלול חכם והמלצה מותאמת אישית לפוזיציה בתיק
+            # שקלול חכם ומדויק להמלצות בניהול תיקים
             if pnl_pct > 15:
-                suggestion = "💡 רווח יפה! שקול לממש חלק רווחים או להשאיר לטווח ארוך"
+                suggestion = "💡 שקול לממש חלק רווחים או להשאיר לטווח ארוך"
             elif pnl_pct < -10:
                 suggestion = "➕ מחיר כרגע זול מעלות הקנייה - הזדמנות מעולה להוסיף כסף (DCA)"
             else:
@@ -347,6 +347,7 @@ def calculate_positions(tx):
                 "סימול": ticker,
                 "כמות": units,
                 "מחיר קנייה ממוצע ($)": round(cost / units, 2) if units > 0 else 0,
+                "עלות כוללת ($)": round(cost, 2),
                 "מחיר אחרון ($)": round(current, 2) if np.isfinite(current) else "לא זמין",
                 "שווי נוכחי ($)": round(value, 2) if np.isfinite(value) else "לא זמין",
                 "רווח/הפסד ($)": round(pnl, 2) if np.isfinite(pnl) else "לא זמין",
@@ -451,13 +452,13 @@ if page == "סקירת שוק חכמה":
 
 
 # =====================================================
-# 2. DAILY TOP 5 RECOMMENDATIONS (DYNAMIC)
+# 2. DAILY TOP 5 RECOMMENDATIONS (DYNAMIC & WEIGHTED)
 # =====================================================
 
 elif page == "המלצות Top 5 יומיות":
 
-    st.title("⭐ המלצות Top 5 יומיות להשקעה")
-    st.markdown("רשימת נכסים שנסרקים מדי יום ומציגים את ההזדמנויות הטובות ביותר מבחינת מחיר, מומנטום וקרבה להנחות זמניות.")
+    st.title("⭐ המלצות Top 5 יומיות מתחלפות להשקעה")
+    st.markdown("רשימת 5 מניות, מדדים וקרנות סל מובילים שנסרקים מדי יום ומדורגים על סמך שקלול חכם של מומנטום RSI, ממוצעים נעים והנחות מחיר זמניות.")
 
     top_candidates = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AMD", "TSLA"]
     
@@ -471,6 +472,7 @@ elif page == "המלצות Top 5 יומיות":
             ma50 = tech["ma50"]
             
             if ma50 and price > ma50 * 0.90:
+                # ציון אטרקטיביות משוקלל מבוסס מומנטום ומחיר זול יחסי
                 attractiveness = (100 - rsi) if rsi < 60 else rsi * 0.4
                 analyzed_list.append({
                     "סימול": ticker,
@@ -478,13 +480,13 @@ elif page == "המלצות Top 5 יומיות":
                     "RSI (מומנטום)": round(rsi, 1),
                     "שינוי חודשי (%)": f"{tech.get('month', 0):+.2f}%" if tech.get('month') is not None else "N/A",
                     "ציון אטרקטיביות": round(attractiveness, 1),
-                    "המלצת מערכת": "🟢 מומלץ לבחינה והשקעה (מחיר נוח)" if rsi < 55 else "🟡 במחיר סביר, כניסה מדורגת"
+                    "המלצת מערכת": "🟢 מומלץ לבדיקה והשקעה (מחיר נוח ומומנטום טוב)" if rsi < 55 else "🟡 במחיר סביר, מומלץ כניסה מדורגת"
                 })
 
     if analyzed_list:
         df_top = pd.DataFrame(analyzed_list).sort_values(by="ציון אטרקטיביות", ascending=False).head(5)
         st.dataframe(df_top.drop(columns=["ציון אטרקטיביות"]), use_container_width=True)
-        st.info("💡 המלצות אלו מתעדכנות באופן דינמי מדי יום לפי ניתוח טכני של מחיר וממוצעים.")
+        st.info("💡 רשימה זו מתעדכנת ומתחלפת באופן דינמי בכל יום בהתאם לנתוני המסחר והשקלול המשולב.")
     else:
         st.warning("לא נמצאו מספיק נתונים להצגת הטופ 5 כרגע.")
 
@@ -667,7 +669,7 @@ elif page == "חדשות":
 elif page == "תיק השקעות והמלצות":
 
     st.title("💼 ניהול תיק השקעות חכם בדולרים ($)")
-    st.markdown("הזן את עסקאות הרכישה שלך. הנתונים נשמרים במסד הנתונים ומתעדכנים אוטומטית מול מחירי השוק החיים.")
+    st.markdown("הזן את עסקאות הרכישה שלך. הנתונים נשמרים במסד הנתונים ומתעדכנים אוטומטית מול מחירי השוק החיים עם המלצות ניהול אישיות.")
 
     with st.form("add_transaction"):
         col1, col2 = st.columns(2)
@@ -686,7 +688,7 @@ elif page == "תיק השקעות והמלצות":
         if submit:
             if ticker and quantity > 0 and price > 0:
                 add_transaction(tx_date, ticker, action, quantity, price, fee, "USD", notes)
-                st.success("העסקה נוספה בהצלחה ונשמרה!")
+                st.success("העסקה נוספה בהצלחה ונשמרה בתיק!")
                 st.rerun()
 
     tx = load_transactions()
@@ -734,7 +736,7 @@ elif page == "תיק השקעות והמלצות":
                 st.rerun()
 
     else:
-        st.info("עדיין לא הוזנו עסקאות לתיק. התחל להזין למעלה כדי לראות את הפוזיציות וההמלצות החכמות.")
+        st.info("עדיין לא הוזנו עסקאות לתיק. התחל להזין למעלה כדי לראות את הפוזיציות שלך ואת ההמלצות החכמות.")
 
 
 # =====================================================
