@@ -9,7 +9,7 @@ from datetime import date
 from io import StringIO
 
 # =====================================================
-# MARKET RADAR PRO - FULL PROFESSIONAL VERSION (10 TABS)
+# MARKET RADAR PRO - ULTIMATE FULL VERSION (10 TABS)
 # =====================================================
 
 st.set_page_config(
@@ -200,7 +200,7 @@ def add_transaction(tx_date, ticker, total_invested, buy_price, notes=""):
     if buy_price <= 0:
         df = get_history(ticker, "5d")
         close = close_series(df)
-        buy_price = float(close.iloc[-1]) if not close.empty else 1.0
+        buy_price = float(close.iloc[-1]) if not close.empty else 100.0
         
     qty = total_invested / buy_price if buy_price > 0 else 0.0
     with connect_db() as con:
@@ -211,7 +211,9 @@ def add_transaction(tx_date, ticker, total_invested, buy_price, notes=""):
 
 def update_transaction(tx_id, tx_date, ticker, total_invested, buy_price, notes=""):
     if buy_price <= 0:
-        buy_price = 1.0
+        df = get_history(ticker, "5d")
+        close = close_series(df)
+        buy_price = float(close.iloc[-1]) if not close.empty else 100.0
     qty = total_invested / buy_price if buy_price > 0 else 0.0
     with connect_db() as con:
         con.execute("""
@@ -253,10 +255,14 @@ def calculate_positions(tx):
         close = close_series(df)
         current = float(close.iloc[-1]) if not close.empty else np.nan
         
-        if units <= 0 and buy_price > 0 and cost > 0:
-            units = cost / buy_price
-        elif units <= 0 and current > 0 and cost > 0:
-            units = cost / current
+        # חישוב כמויות מדויק ואוטומטי בלייב
+        if units <= 0:
+            if buy_price > 0 and cost > 0:
+                units = cost / buy_price
+            elif current > 0 and cost > 0:
+                units = cost / current
+            else:
+                units = 1.0
 
         tech = technical(df)
         info = get_info(ticker)
@@ -276,6 +282,7 @@ def calculate_positions(tx):
         rsi = tech.get("rsi", 50.0)
         ma200 = tech.get("ma200", current)
         
+        # מנוע המלצות אקטיבי מבוסס נתונים
         if pnl_pct > 20 or (rsi > 72 and pnl_pct > 10):
             suggestion = "🔴 למכור ולמימוש רווחים: הנכס הגיע ליעד רווח גבוה או נמצא במצב קנוי-יתר (RSI > 72)."
         elif pnl_pct < -10 and (rsi < 45 or vix_val > 22):
@@ -290,7 +297,7 @@ def calculate_positions(tx):
             "תאריך": tx_date,
             "נכס/מדד": ticker,
             "סכום שהושקע ($)": round(cost, 2),
-            "מחיר קנייה ($)": round(buy_price, 2),
+            "מחיר קנייה ($)": round(buy_price, 2) if buy_price > 0 else round(current, 2),
             "מחיר נוכחי בלייב ($)": round(current, 2) if np.isfinite(current) else 0.0,
             "שווי עדכני ($)": round(value, 2),
             "רווח/הפסד ($)": round(pnl, 2),
@@ -354,7 +361,7 @@ if page == "תיק השקעות והמלצות":
                 tx_date = st.date_input("תאריך השקעה", date.today())
             with col2:
                 total_invested = st.number_input("סכום ההשקעה הכולל ($)", min_value=0.0, value=0.0, step=100.0, format="%.2f", placeholder="הכנס סכום...")
-                buy_price = st.number_input("מחיר קנייה ליחידה ($)", min_value=0.0, value=0.0, step=1.0, format="%.2f", placeholder="הכנס מחיר קנייה...")
+                buy_price = st.number_input("מחיר קנייה ליחידה ($) [השאר 0 לזיהוי אוטומטי]", min_value=0.0, value=0.0, step=1.0, format="%.2f", placeholder="הכנס מחיר קנייה...")
             notes = st.text_input("הערות (אופציונלי)")
             submit = st.form_submit_button("שמור השקעה בתיק")
 
