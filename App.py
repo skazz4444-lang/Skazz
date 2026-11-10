@@ -9,7 +9,7 @@ from datetime import date
 from io import StringIO
 
 # =====================================================
-# MARKET RADAR PRO - ULTIMATE INVESTMENT DASHBOARD
+# MARKET RADAR PRO - FULL PROFESSIONAL VERSION (10 TABS)
 # =====================================================
 
 st.set_page_config(
@@ -20,7 +20,7 @@ st.set_page_config(
 
 DB = "market_radar.db"
 
-# ---------------- PROFESSIONAL LIGHT UI DESIGN ----------------
+# ---------------- PROFESSIONAL UI DESIGN ----------------
 
 st.markdown("""
 <style>
@@ -86,7 +86,7 @@ def init_db():
 init_db()
 
 
-# ---------------- ROBUST DATA SOURCES ----------------
+# ---------------- ROBUST DATA SOURCES & LIVE PRICES ----------------
 
 @st.cache_data(ttl=60)
 def get_history(ticker, period="1y"):
@@ -253,7 +253,6 @@ def calculate_positions(tx):
         close = close_series(df)
         current = float(close.iloc[-1]) if not close.empty else np.nan
         
-        # חישוב אוטומטי של כמות יחידות אם לא הוזנו בצורה תקינה
         if units <= 0 and buy_price > 0 and cost > 0:
             units = cost / buy_price
         elif units <= 0 and current > 0 and cost > 0:
@@ -277,7 +276,6 @@ def calculate_positions(tx):
         rsi = tech.get("rsi", 50.0)
         ma200 = tech.get("ma200", current)
         
-        # מנוע המלצות אקטיבי מבוסס תנאי שוק
         if pnl_pct > 20 or (rsi > 72 and pnl_pct > 10):
             suggestion = "🔴 למכור ולמימוש רווחים: הנכס הגיע ליעד רווח גבוה או נמצא במצב קנוי-יתר (RSI > 72)."
         elif pnl_pct < -10 and (rsi < 45 or vix_val > 22):
@@ -307,7 +305,7 @@ def calculate_positions(tx):
 
 
 # =====================================================
-# SIDEBAR NAVIGATION
+# SIDEBAR NAVIGATION (ALL 10 PAGES)
 # =====================================================
 
 st.sidebar.title("📊 MARKET RADAR PRO")
@@ -338,12 +336,12 @@ st.sidebar.caption("הנתונים מתעדכנים ישירות משערי הש
 
 
 # =====================================================
-# 1. PORTFOLIO MANAGEMENT (MAIN)
+# 1. PORTFOLIO MANAGEMENT
 # =====================================================
 
 if page == "תיק השקעות והמלצות":
     st.title("💼 ניהול תיק השקעות והמלצות חכמות מעמיקות")
-    st.markdown("כאן תוכל לנהל את התיק שלך. המערכת שולפת שערי שוק חיים בדולרים, מחשבת תשואות בלייב ומציגה ניתוח מלא והמלצות.")
+    st.markdown("כאן תוכל לנהל את התיק שלך. השדות נקיים לחלוטין להזנה נוחה. המערכת שולפת את שערי השוק בלייב ומנתחת את התיק לעומק.")
 
     tab_add, tab_edit, tab_view = st.tabs(["➕ הוספת השקעה", "✏️ עריכה ומחיקה", "📋 צפייה וניתוח התיק"])
 
@@ -389,7 +387,7 @@ if page == "תיק השקעות והמלצות":
                 
                 e_date = st.date_input("תאריך", default_date)
                 e_invested = st.number_input("סכום השקעה כולל ($)", min_value=0.0, value=float(selected_row.get("total_invested", 0.0)), format="%.2f")
-                e_price = st.number_input("מחיר קנייה ליחידה ($)", min_value=0.0, value=float(selected_row.get("buy_price", 0.0)), format="%.2f")
+                e_price = st.number_input("מחיר הקנייה ליחידה ($)", min_value=0.0, value=float(selected_row.get("buy_price", 0.0)), format="%.2f")
                 e_notes = st.text_input("הערות", value=str(selected_row.get("notes", "")))
 
                 col_e1, col_e2 = st.columns(2)
@@ -713,3 +711,4 @@ elif page == "Backtesting":
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("אין מספיק נתונים היסטוריים לביצוע הבדיקה.")
+ט
