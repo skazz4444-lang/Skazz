@@ -9,7 +9,7 @@ from datetime import date
 from io import StringIO
 
 # =====================================================
-# MARKET RADAR - CLEAN & PRO STREAMLIT APP
+# MARKET RADAR - FINAL PRO STREAMLIT APP
 # =====================================================
 
 st.set_page_config(
@@ -20,7 +20,7 @@ st.set_page_config(
 
 DB = "market_radar.db"
 
-# ---------------- CLEAN & MODERN DESIGN (LIGHT/NEUTRAL) ----------------
+# ---------------- CLEAN & MODERN DESIGN (LIGHT THEME) ----------------
 
 st.markdown("""
 <style>
@@ -335,9 +335,9 @@ def calculate_positions(tx):
             pnl = value - cost if np.isfinite(value) else np.nan
             pnl_pct = (pnl / cost * 100) if cost > 0 and np.isfinite(pnl) else 0
 
-            # שקלול חכם עבור פוזיציה בתיק בהתنادחות מול מחירי כניסה
+            # שקלול חכם והמלצה מותאמת אישית לפוזיציה בתיק
             if pnl_pct > 15:
-                suggestion = "💡 רווח יפה! שקול לממש חלק או להשאיר לטווח ארוך"
+                suggestion = "💡 רווח יפה! שקול לממש חלק רווחים או להשאיר לטווח ארוך"
             elif pnl_pct < -10:
                 suggestion = "➕ מחיר כרגע זול מעלות הקנייה - הזדמנות מעולה להוסיף כסף (DCA)"
             else:
@@ -351,7 +351,7 @@ def calculate_positions(tx):
                 "שווי נוכחי ($)": round(value, 2) if np.isfinite(value) else "לא זמין",
                 "רווח/הפסד ($)": round(pnl, 2) if np.isfinite(pnl) else "לא זמין",
                 "תשואה (%)": f"{pnl_pct:+.2f}%" if np.isfinite(pnl_pct) else "לא זמין",
-                "המלצה חכמה לתיק": suggestion
+                "המלצה חכמה לפוזיציה": suggestion
             })
 
     return pd.DataFrame(results)
@@ -471,7 +471,6 @@ elif page == "המלצות Top 5 יומיות":
             ma50 = tech["ma50"]
             
             if ma50 and price > ma50 * 0.90:
-                # שקלול אטרקטיביות יומי מתחלף
                 attractiveness = (100 - rsi) if rsi < 60 else rsi * 0.4
                 analyzed_list.append({
                     "סימול": ticker,
