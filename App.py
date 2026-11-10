@@ -9,7 +9,7 @@ from datetime import date
 from io import StringIO
 
 # =====================================================
-# MARKET RADAR - FINAL PRO STREAMLIT APP
+# MARKET RADAR - CLEAN & PRO STREAMLIT APP
 # =====================================================
 
 st.set_page_config(
@@ -20,31 +20,31 @@ st.set_page_config(
 
 DB = "market_radar.db"
 
-# ---------------- DESIGN & CLEAN CSS ----------------
+# ---------------- CLEAN & MODERN DESIGN (LIGHT/NEUTRAL) ----------------
 
 st.markdown("""
 <style>
 .stApp {
-    background: #0b1220;
-    color: #e8eef7;
+    background: #f8fafc;
+    color: #1e293b;
 }
 [data-testid="stSidebar"] {
-    background: #111c2e;
-    border-right: 1px solid #1e293b;
+    background: #f1f5f9;
+    border-right: 1px solid #e2e8f0;
 }
 [data-testid="stMetric"] {
-    background: #131d31;
-    border: 1px solid #223249;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
     padding: 16px;
     border-radius: 12px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 h1, h2, h3, h4 {
-    color: #f8fafc;
+    color: #0f172a;
     font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 }
 .stCaption {
-    color: #94a3b8;
+    color: #64748b;
 }
 div.stButton > button {
     background-color: #2563eb;
@@ -89,9 +89,6 @@ init_db()
 
 @st.cache_data(ttl=60)
 def get_history(ticker, period="2y"):
-    """
-    שליפת היסטוריה עם מנגנון גיבוי (Fallback) למניעת קריסות
-    """
     try:
         df = yf.download(ticker, period=period, auto_adjust=True, progress=False, threads=False)
         if df.empty:
@@ -101,7 +98,6 @@ def get_history(ticker, period="2y"):
         df.index = pd.to_datetime(df.index)
         return df.dropna()
     except Exception:
-        # גיבוי שניוני במקרה של תקלה ברשת או בספק המרכזי
         try:
             t = yf.Ticker(ticker)
             df = t.history(period=period)
@@ -207,18 +203,18 @@ def price_chart(df, title):
     close = close_series(df)
     fig = go.Figure()
 
-    fig.add_trace(go.Scatter(x=close.index, y=close, name="מחיר ($)", line=dict(color="#3b82f6", width=2)))
+    fig.add_trace(go.Scatter(x=close.index, y=close, name="מחיר ($)", line=dict(color="#2563eb", width=2)))
 
     for period in [50, 200]:
         if len(close) >= period:
-            color = "#10b981" if period == 50 else "#f59e0b"
+            color = "#059669" if period == 50 else "#d97706"
             fig.add_trace(go.Scatter(x=close.index, y=close.rolling(period).mean(), name=f"MA{period}", line=dict(color=color, width=1.5, dash="dot")))
 
     fig.update_layout(
         title=title,
-        template="plotly_dark",
-        paper_bgcolor="#0b1220",
-        plot_bgcolor="#0b1220",
+        template="plotly_white",
+        paper_bgcolor="#ffffff",
+        plot_bgcolor="#ffffff",
         height=400,
         hovermode="x unified",
         margin=dict(l=20, r=20, t=40, b=20)
@@ -279,11 +275,11 @@ def calculate_market_score(sp_df, vix_value):
     score = round(float(np.mean(list(factors.values()))), 1)
 
     if score >= 75:
-        verdict = "🟢 מצב שוק אטרקטיבי: התנאים טובים לכניסה או להשקעה נוספת."
+        verdict = "🟢 מצב שוק אטרקטיבי: התנאים מצוינים לכניסה או להשקעה נוספת."
     elif score >= 50:
-        verdict = "🟡 מצב שוק ניטרלי: כדאי להשקיע בסכומים מדודים או להמתין להזדמנות."
+        verdict = "🟡 מצב שוק ניטרלי: כדאי להשקיע בסכומים מדודים או להמתין להזדמנות טובה יותר."
     else:
-        verdict = "🔴 שוק תנודתי או יקר: מומלץ לנקוט משנה זהירות ולהשקיע בהדרגה."
+        verdict = "🔴 שוק תנודתי או יקר: מומלץ לנקוט משנה זהירות, לא לקפוץ בראש ולהשקיע בהדרגה."
 
     return score, factors, verdict
 
@@ -339,22 +335,23 @@ def calculate_positions(tx):
             pnl = value - cost if np.isfinite(value) else np.nan
             pnl_pct = (pnl / cost * 100) if cost > 0 and np.isfinite(pnl) else 0
 
+            # שקלול חכם עבור פוזיציה בתיק בהתنادחות מול מחירי כניסה
             if pnl_pct > 15:
-                suggestion = "💡 שקול לממש חלק רווחים או להשאיר לטווח ארוך"
+                suggestion = "💡 רווח יפה! שקול לממש חלק או להשאיר לטווח ארוך"
             elif pnl_pct < -10:
-                suggestion = "➕ מחיר כרגע נמוך מעלות הקנייה - הזדמנות טובה להוסיף כסף (DCA)"
+                suggestion = "➕ מחיר כרגע זול מעלות הקנייה - הזדמנות מעולה להוסיף כסף (DCA)"
             else:
                 suggestion = "🛡️ להשאיר את הכסף בנכס - המגמה תקינה"
 
             results.append({
                 "סימול": ticker,
                 "כמות": units,
-                "עלות כוללת ($)": round(cost, 2),
+                "מחיר קנייה ממוצע ($)": round(cost / units, 2) if units > 0 else 0,
                 "מחיר אחרון ($)": round(current, 2) if np.isfinite(current) else "לא זמין",
                 "שווי נוכחי ($)": round(value, 2) if np.isfinite(value) else "לא זמין",
                 "רווח/הפסד ($)": round(pnl, 2) if np.isfinite(pnl) else "לא זמין",
                 "תשואה (%)": f"{pnl_pct:+.2f}%" if np.isfinite(pnl_pct) else "לא זמין",
-                "המלצה חכמה": suggestion
+                "המלצה חכמה לתיק": suggestion
             })
 
     return pd.DataFrame(results)
@@ -398,11 +395,11 @@ st.sidebar.caption("כל הנתונים המוצגים מחושבים בדולר
 if page == "סקירת שוק חכמה":
 
     st.title("🌎 סקירת שוק ותזמון כניסה חכם")
-    st.markdown("כלי זה משקלל את כל מדדי המאקרו, המומנטום ומדד הפחד כדי לומר לך האם הזמן נכון להשקיע כעת.")
+    st.markdown("כלי זה משקלל את כל המדדים והפרמטרים כדי לקבוע האם המחיר כרגע אטרקטיבי לכניסה.")
 
     assets = {
-        "S&P 500": "^GSPC",
-        "Nasdaq 100": "^NDX",
+        "S&P 500 (SPY)": "SPY",
+        "Nasdaq 100 (QQQ)": "QQQ",
         "מדד הפחד (VIX)": "^VIX",
         "דולר / שקל": "ILS=X"
     }
@@ -454,13 +451,13 @@ if page == "סקירת שוק חכמה":
 
 
 # =====================================================
-# 2. DAILY TOP 5 RECOMMENDATIONS
+# 2. DAILY TOP 5 RECOMMENDATIONS (DYNAMIC)
 # =====================================================
 
 elif page == "המלצות Top 5 יומיות":
 
     st.title("⭐ המלצות Top 5 יומיות להשקעה")
-    st.markdown("רשימת נכסים מובילים שעברו סריקה טכנית יומית ונמצאים כרגע בנקודת כניסה נוחה או במחיר אטרקטיבי.")
+    st.markdown("רשימת נכסים שנסרקים מדי יום ומציגים את ההזדמנויות הטובות ביותר מבחינת מחיר, מומנטום וקרבה להנחות זמניות.")
 
     top_candidates = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AMD", "TSLA"]
     
@@ -473,21 +470,22 @@ elif page == "המלצות Top 5 יומיות":
             price = tech["price"]
             ma50 = tech["ma50"]
             
-            if ma50 and price > ma50 * 0.95:
-                attractiveness = (100 - rsi) if rsi < 60 else rsi * 0.5
+            if ma50 and price > ma50 * 0.90:
+                # שקלול אטרקטיביות יומי מתחלף
+                attractiveness = (100 - rsi) if rsi < 60 else rsi * 0.4
                 analyzed_list.append({
                     "סימול": ticker,
                     "מחיר נוכחי ($)": round(price, 2),
                     "RSI (מומנטום)": round(rsi, 1),
                     "שינוי חודשי (%)": f"{tech.get('month', 0):+.2f}%" if tech.get('month') is not None else "N/A",
                     "ציון אטרקטיביות": round(attractiveness, 1),
-                    "המלצת מערכת": "🟢 מומלץ לבחינה והשקעה לטווח קצר-בינוני" if rsi < 55 else "🟡 במחיר סביר, לשקול כניסה מדורגת"
+                    "המלצת מערכת": "🟢 מומלץ לבחינה והשקעה (מחיר נוח)" if rsi < 55 else "🟡 במחיר סביר, כניסה מדורגת"
                 })
 
     if analyzed_list:
         df_top = pd.DataFrame(analyzed_list).sort_values(by="ציון אטרקטיביות", ascending=False).head(5)
         st.dataframe(df_top.drop(columns=["ציון אטרקטיביות"]), use_container_width=True)
-        st.info("💡 המלצות אלו מתעדכנות באופן שוטף לפי נתוני מחיר לייב וממוצעים נעים.")
+        st.info("💡 המלצות אלו מתעדכנות באופן דינמי מדי יום לפי ניתוח טכני של מחיר וממוצעים.")
     else:
         st.warning("לא נמצאו מספיק נתונים להצגת הטופ 5 כרגע.")
 
@@ -499,7 +497,7 @@ elif page == "המלצות Top 5 יומיות":
 elif page == "קרנות ממונפות":
 
     st.title("⚡ ניתוח והמלצות על קרנות ממונפות")
-    st.warning("⚠️ אזהרה: קרנות ממונפות (כמו 2x או 3x) מתאימות למשקיעים מתקדמים בלבד, שכן הן מגדילות רווחים אך גם הפסדים ושחיקה במצבי שוק תנודתיים.")
+    st.warning("⚠️ אזהרה: קרנות ממונפות (2x או 3x) מתאימות למשקיעים מתקדמים ומגדילות תנודתיות ושחיקה.")
 
     lev_tickers = {
         "TQQQ (3x Nasdaq - טכנולוגיה ממונפת)": "TQQQ",
@@ -524,11 +522,11 @@ elif page == "קרנות ממונפות":
         st.subheader("🤖 ניתוח מצב ומומלצות לקרן ממונפות זו:")
         
         if tech_lev["price"] > tech_lev.get("ma200", 0) and tech_lev.get("rsi", 50) < 65:
-            st.success(f"**המלצה: כניסה זהירה אפשרית.** הנכס נמצא מעל ממוצע 200 (מגמת עליה ראשית חיובית), מה שמפחית את סיכון השחיקה.")
+            st.success(f"**המלצה: כניסה זהירה אפשרית.** הנכס מעל ממוצע 200 (מגמת עליה חיובית ראשית).")
         elif tech_lev.get("rsi", 50) > 70:
-            st.warning(f"**המלצה: לא מומלץ להיכנס עכשיו.** המדד נמצא ב-RSI גבוה מאוד (קנוי יתר).")
+            st.warning(f"**המלצה: לא להיכנס עכשיו.** RSI גבוה מאוד (קנוי יתר).")
         else:
-            st.error(f"**המלצה: סיכון גבוה כרגע.** המגמה מעורבת או שהנכס מתחת לממוצעים.")
+            st.error(f"**המלצה: סיכון גבוה כרגע.** המגמה מעורבת או מתחת לממוצעים.")
 
         price_chart(df_lev, f"ביצועי {ticker_symbol} בדולרים ($)")
     else:
@@ -544,8 +542,8 @@ elif page == "ניתוח מדדים":
     st.title("📈 ניתוח מדדים מובילים")
 
     choices = {
-        "S&P 500 (SPY / GSPC)": "^GSPC",
-        "Nasdaq 100 (QQQ / NDX)": "^NDX"
+        "S&P 500 (SPY)": "SPY",
+        "Nasdaq 100 (QQQ)": "QQQ"
     }
 
     selected = st.selectbox("בחר מדד", list(choices))
@@ -627,8 +625,8 @@ elif page == "מאקרו וכלכלה":
         st.metric(selected, f"{latest['value']:.3f}", str(latest["date"].date()))
 
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df["date"], y=df["value"], mode="lines", name=selected, line=dict(color="#3b82f6")))
-        fig.update_layout(template="plotly_dark", height=400, paper_bgcolor="#0b1220", plot_bgcolor="#0b1220")
+        fig.add_trace(go.Scatter(x=df["date"], y=df["value"], mode="lines", name=selected, line=dict(color="#2563eb")))
+        fig.update_layout(template="plotly_white", height=400, paper_bgcolor="#ffffff", plot_bgcolor="#ffffff")
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("הנתון אינו זמין כרגע.")
@@ -670,7 +668,7 @@ elif page == "חדשות":
 elif page == "תיק השקעות והמלצות":
 
     st.title("💼 ניהול תיק השקעות חכם בדולרים ($)")
-    st.markdown("הזן את עסקאות הרכישה שלך. הנתונים נשמרים במסד הנתונים ומתעדכנים חי מול מחירי השוק עם המלצות ניהול.")
+    st.markdown("הזן את עסקאות הרכישה שלך. הנתונים נשמרים במסד הנתונים ומתעדכנים אוטומטית מול מחירי השוק החיים.")
 
     with st.form("add_transaction"):
         col1, col2 = st.columns(2)
@@ -723,7 +721,7 @@ elif page == "תיק השקעות והמלצות":
             valid = positions.dropna(subset=["שווי נוכחי ($)"])
             if not valid.empty:
                 fig = go.Figure(data=[go.Pie(labels=valid["סימול"], values=valid["שווי נוכחי ($)"], hole=0.45)])
-                fig.update_layout(title="פיזור נכסים בתיק ($)", template="plotly_dark", paper_bgcolor="#0b1220", plot_bgcolor="#0b1220")
+                fig.update_layout(title="פיזור נכסים בתיק ($)", template="plotly_white", paper_bgcolor="#ffffff", plot_bgcolor="#ffffff")
                 st.plotly_chart(fig, use_container_width=True)
 
         st.divider()
@@ -786,10 +784,10 @@ elif page == "Backtesting":
         model = 10000 * (1 + model_returns).cumprod()
 
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=close_bt.index, y=buy_hold, name="החזקה רגילה (Buy & Hold)", line=dict(color="#3b82f6")))
-        fig.add_trace(go.Scatter(x=close_bt.index, y=model, name="אסטרטגיית ממוצעים נעים", line=dict(color="#10b981")))
+        fig.add_trace(go.Scatter(x=close_bt.index, y=buy_hold, name="החזקה רגילה (Buy & Hold)", line=dict(color="#2563eb")))
+        fig.add_trace(go.Scatter(x=close_bt.index, y=model, name="אסטרטגיית ממוצעים נעים", line=dict(color="#059669")))
 
-        fig.update_layout(title=f"השוואת תשואה היסטורית על סך $10,000 עבור {ticker}", template="plotly_dark", height=450, paper_bgcolor="#0b1220", plot_bgcolor="#0b1220")
+        fig.update_layout(title=f"השוואת תשואה היסטורית על סך $10,000 עבור {ticker}", template="plotly_white", height=450, paper_bgcolor="#ffffff", plot_bgcolor="#ffffff")
         st.plotly_chart(fig, use_container_width=True)
 
         c1, c2 = st.columns(2)
