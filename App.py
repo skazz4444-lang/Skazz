@@ -61,7 +61,7 @@ div.stButton > button:hover {
 """, unsafe_allow_html=True)
 
 
-# ---------------- DATABASE SETUP ----------------
+# ---------------- DATABASE SETUP & MIGRATION ----------------
 
 def connect_db():
     return sqlite3.connect(DB, check_same_thread=False)
@@ -73,12 +73,22 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tx_date TEXT NOT NULL,
             ticker TEXT NOT NULL,
-            total_invested REAL NOT NULL,
-            buy_price REAL NOT NULL,
-            quantity REAL NOT NULL,
+            total_invested REAL DEFAULT 0,
+            buy_price REAL DEFAULT 0,
+            quantity REAL DEFAULT 0,
             notes TEXT DEFAULT ''
         )
         """)
+        # בדיקה ווידוא עמודות בטבלה קיימת למניעת שגיאות
+        cursor = con.cursor()
+        cursor.execute("PRAGMA table_info(transactions)")
+        columns = [column[1] for column in cursor.fetchall()]
+        if "total_invested" not in columns:
+            con.execute("ALTER TABLE transactions ADD COLUMN total_invested REAL DEFAULT 0")
+        if "buy_price" not in columns:
+            con.execute("ALTER TABLE transactions ADD COLUMN buy_price REAL DEFAULT 0")
+        if "quantity" not in columns:
+            con.execute("ALTER TABLE transactions ADD COLUMN quantity REAL DEFAULT 0")
 
 init_db()
 
@@ -292,6 +302,19 @@ def add_transaction(tx_date, ticker, total_invested, buy_price, notes=""):
         VALUES (?, ?, ?, ?, ?, ?)
         """, (str(tx_date), ticker.upper(), total_invested, buy_price, quantity, notes))
 
+def update_transaction(tx_id, tx_date, ticker, total_invested, buy_price, notes=""):
+    quantity = total_invested / buy_price if buy_price > 0 else 0
+    with connect_db() as con:
+        con.execute("""
+        UPDATE transactions 
+        SET tx_date=?, ticker=?, total_invested=?, buy_price=?, quantity=?, notes=?
+        WHERE id=?
+        """, (str(tx_date), ticker.upper(), total_invested, buy_price, quantity, notes, int(tx_id)))
+
+def delete_transaction(tx_id):
+    with connect_db() as con:
+        con.execute("DELETE FROM transactions WHERE id=?", (int(tx_id),))
+
 def load_transactions():
     with connect_db() as con:
         return pd.read_sql_query("SELECT * FROM transactions ORDER BY tx_date DESC, id DESC", con)
@@ -312,6 +335,7 @@ def calculate_positions(tx):
         cost = float(row["total_invested"])
         buy_price = float(row["buy_price"])
         units = float(row["quantity"])
+        notes = row["notes"]
 
         df = get_history(ticker, "6m")
         close = close_series(df)
@@ -345,7 +369,8 @@ def calculate_positions(tx):
             "שווי עדכני ($)": round(value, 2) if np.isfinite(value) else "לא זמין",
             "רווח/הפסד ($)": round(pnl, 2) if np.isfinite(pnl) else "לא זמין",
             "תשואה (%)": f"{pnl_pct:+.2f}%" if np.isfinite(pnl_pct) else "לא זמין",
-            "המלצת פעולה חכמה": suggestion
+            "המלצת פעולה חכמה": suggestion,
+            "הערות": notes
         })
 
     return pd.DataFrame(results)
@@ -453,7 +478,6 @@ elif page == "המלצות Top 5 יומיות":
     st.title("⭐ המלצות Top 5 יומיות להשקעה")
     st.markdown("סריקה ומשקלל רחב של מדדים, קרנות סל ומניות מובילות. המערכת מנתחת את מכלול הפרמטרים ומציגה מדי יום את 5 המובילים בציון האטרקטיביות.")
 
-    # סל מקיף של נכסים מובילים לבחינה יומיות
     scan_pool = [
         {"name": "S&P 500 ETF", "ticker": "SPY"},
         {"name": "Nasdaq 100 ETF", "ticker": "QQQ"},
@@ -481,10 +505,8 @@ elif page == "המלצות Top 5 יומיות":
                 ma200 = tech.get("ma200", price)
                 month_change = tech.get("month", 0)
 
-                # חישוב ציון אטרקטיביות משוקלל רחב
-                score = 50.0  # ציון בסיס
+                score = 50.0
 
-                # 1. רכיב RSI (מחיר זול / מכירת יתר)
                 if rsi < 40:
                     score += 35
                 elif rsi < 55:
@@ -492,17 +514,14 @@ elif page == "המלצות Top 5 יומיות":
                 elif rsi > 70:
                     score -= 25
 
-                # 2. רכיב מגמה (מחיר ביחס לממוצע 50 ו-200)
                 if price > ma200:
-                    score += 15  # מגמת עליה ראשית
+                    score += 15
                 if price > ma50:
                     score += 10
 
-                # 3. רכיב הנחה (תיקון זמני במחיר מעניק הזדמנות)
                 if month_change is not None and month_change < -2:
                     score += 15
 
-                # הגדרת המלצת איכות בעברית
                 if score >= 75:
                     rec = "🟢 מומלץ מאוד לבדיקה (מחיר זול ומומנטום איסוף)"
                 elif score >= 60:
@@ -528,75 +547,104 @@ elif page == "המלצות Top 5 יומיות":
 
 
 # =====================================================
-# 3. PORTFOLIO MANAGEMENT (EASY 4-FIELD FORM)
+# 3. PORTFOLIO MANAGEMENT (ADD, EDIT, DELETE)
 # =====================================================
 
 elif page == "תיק השקעות והמלצות":
 
     st.title("💼 ניהול תיק השקעות והמלצות בזמן אמת")
-    st.markdown("הזן את ההשקעות שלך בצורה פשוטה. הנתונים יישמרו ויתעדכנו בלייב מול מחירי השוק עם המלצות פעולה.")
+    st.markdown("הזן, ערוך או מחק את ההשקעות שלך. הנתונים נשמרים ומתעדכנים בלייב מול מחירי השוק עם המלצות פעולה חכמות.")
 
-    # טופס פשוט - 4 שדות בלבד!
-    with st.form("simple_add_form"):
-        st.subheader("➕ הוספת השקעה חדשה לתיק")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            ticker = st.selectbox(
-                "בחר מדד / נכס להשקעה",
-                ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"]
-            )
-            tx_date = st.date_input("תאריך השקעה", date.today())
+    tab_add, tab_edit, tab_view = st.tabs(["➕ הוספת השקעה", "✏️ עריכה ומחיקה", "📋 צפייה בתיק ובסטטיסטיקות"])
+
+    with tab_add:
+        with st.form("simple_add_form"):
+            st.subheader("הוספת השקעה חדשה")
+            col1, col2 = st.columns(2)
             
-        with col2:
-            total_invested = st.number_input("סכום ההשקעה הכולל בדולרים ($)", min_value=1.0, value=1000.0, step=100.0)
-            buy_price = st.number_input("מחיר הקנייה ליחידה ($) (כמה השער היה כשרכשת)", min_value=0.1, value=500.0, step=1.0)
+            with col1:
+                ticker = st.selectbox(
+                    "בחר מדד / נכס להשקעה",
+                    ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"]
+                )
+                tx_date = st.date_input("תאריך השקעה", date.today())
+                
+            with col2:
+                total_invested = st.number_input("סכום ההשקעה הכולל בדולרים ($)", min_value=1.0, value=1000.0, step=100.0)
+                buy_price = st.number_input("מחיר הקנייה ליחידה ($) (כמה השער היה כשרכשת)", min_value=0.1, value=500.0, step=1.0)
 
-        notes = st.text_input("הערה חופשית (אופציונלי)")
-        submit = st.form_submit_button("שמור השקעה בתיק")
+            notes = st.text_input("הערה חופשית (אופציונלי)")
+            submit = st.form_submit_button("שמור השקעה בתיק")
 
-        if submit:
-            add_transaction(tx_date, ticker, total_invested, buy_price, notes)
-            st.success(f"השקעה ב-{ticker} על סך ${total_invested:,.2f} נשמרה בהצלחה!")
-            st.rerun()
+            if submit:
+                add_transaction(tx_date, ticker, total_invested, buy_price, notes)
+                st.success(f"השקעה ב-{ticker} על סך ${total_invested:,.2f} נשמרה בהצלחה!")
+                st.rerun()
 
     tx = load_transactions()
 
-    if not tx.empty:
-        st.divider()
-        positions = calculate_positions(tx)
+    with tab_edit:
+        st.subheader("✏️ עריכה או מחיקה של השקעה קיימת")
+        if not tx.empty:
+            edit_id = st.selectbox("בחר מזהה (ID) של השקעה לעריכה/מחיקה", tx["id"].tolist())
+            selected_row = tx[tx["id"] == edit_id].iloc[0]
 
-        st.subheader("📊 ההשקעות שלך ומצב התיק המעודכן (בלייב)")
-        st.dataframe(positions, use_container_width=True)
+            with st.form("edit_form"):
+                e_ticker = st.selectbox("נכס/מדד", ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"], index=["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"].index(selected_row["ticker"]) if selected_row["ticker"] in ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"] else 0)
+                e_date = st.date_input("תאריך", pd.to_datetime(selected_row["tx_date"]).date())
+                e_invested = st.number_input("סכום השקעה כולל ($)", min_value=1.0, value=float(selected_row["total_invested"]))
+                e_price = st.number_input("מחיר קנייה ליחידה ($)", min_value=0.1, value=float(selected_row["buy_price"]))
+                e_notes = st.text_input("הערות", value=selected_row["notes"])
 
-        valid_vals = positions.dropna(subset=["שווי עדכני ($)"])
-        if not valid_vals.empty:
-            total_cost = positions["סכום שהושקע ($)"].sum()
-            total_val = positions["שווי עדכני ($)"].sum()
-            total_pnl = total_val - total_cost
-            total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else 0
+                col_e1, col_e2 = st.columns(2)
+                update_btn = col_e1.form_submit_button("עדכן השקעה")
+                delete_btn = col_e2.form_submit_button("מחק השקעה זו")
 
-            c1, c2, c3 = st.columns(3)
-            c1.metric("סך הכל הושקע ($)", money(total_cost))
-            c2.metric("שווי התיק כיום ($)", money(total_val))
-            c3.metric("סך רווח / הפסד ($)", money(total_pnl), f"{total_pnl_pct:+.2f}%")
+                if update_btn:
+                    update_transaction(edit_id, e_date, e_ticker, e_invested, e_price, e_notes)
+                    st.success(f"השקעה מס' {edit_id} עודכנה בהצלחה!")
+                    st.rerun()
+                if delete_btn:
+                    delete_transaction(edit_id)
+                    st.success(f"השקעה מס' {edit_id} נמחקה בהצלחה!")
+                    st.rerun()
+        else:
+            st.info("אין עדיין השקעות בתיק לעריכה.")
 
-        st.divider()
-        st.subheader("🛠️ עריכה / מחיקת השקעות")
-        col_del1, col_del2 = st.columns([2, 1])
-        with col_del1:
-            delete_id = st.number_input("הזן מספר מזהה (ID) של השקעה למחיקה", min_value=1, step=1)
-        with col_del2:
-            st.write("")
-            st.write("")
-            if st.button("מחק השקעה"):
-                with connect_db() as con:
-                    con.execute("DELETE FROM transactions WHERE id=?", (int(delete_id),))
-                st.success(f"השקעה מס' {delete_id} נמחקה.")
-                st.rerun()
+    with tab_view:
+        if not tx.empty:
+            st.subheader("📋 היסטוריית עסקאות שמורות")
+            st.dataframe(tx, use_container_width=True)
 
-    else:
-        st.info("עדיין לא הוזנו השקעות. הזן את ההשקעה הראשונה שלך למעלה כדי להתחיל לעקוב!")
+            st.download_button(
+                "הורדת עסקאות כקובץ CSV",
+                tx.to_csv(index=False).encode("utf-8-sig"),
+                "my_portfolio_transactions.csv",
+                "text/csv"
+            )
+
+            positions = calculate_positions(tx)
+
+            st.subheader("📊 פוזיציות פתוחות מעודכנות והמלצות חכמות")
+            st.dataframe(positions, use_container_width=True)
+
+            valid_vals = positions.dropna(subset=["שווי עדכני ($)"])
+            if not valid_vals.empty:
+                total_cost = positions["סכום שהושקע ($)"].sum()
+                total_val = positions["שווי עדכני ($)"].sum()
+                total_pnl = total_val - total_cost
+                total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else 0
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("סך הכל הושקע ($)", money(total_cost))
+                c2.metric("שווי התיק כיום ($)", money(total_val))
+                c3.metric("סך רווח / הפסד ($)", money(total_pnl), f"{total_pnl_pct:+.2f}%")
+
+                fig = go.Figure(data=[go.Pie(labels=positions["נכס/מדד"], values=positions["שווי עדכני ($)"], hole=0.45)])
+                fig.update_layout(title="פיזור נכסים בתיק ($)", template="plotly_white", paper_bgcolor="#ffffff", plot_bgcolor="#ffffff")
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("עדיין לא הוזנו השקעות לתיק. עבור ללשונית 'הוספת השקעה' כדי להתחיל.")
 
 
 # =====================================================
@@ -615,7 +663,7 @@ elif page == "קרנות ממונפות":
         "SSO (2x S&P 500 - ממונף מתון)": "SSO"
     }
 
-    selected_lev = st.selectbox("בחר קרן ממונפת לבדיקה", list(lev_tickers.keys()))
+    selected_lev = st.selectbox("בחר קרן ממונפות לבדיקה", list(lev_tickers.keys()))
     ticker_symbol = lev_tickers[selected_lev]
 
     df_lev = get_history(ticker_symbol, "1y")
