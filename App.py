@@ -9,7 +9,7 @@ from datetime import date
 from io import StringIO
 
 # =====================================================
-# MARKET RADAR - ULTIMATE PRO STREAMLIT APP
+# MARKET RADAR - FINAL STABLE VERSION
 # =====================================================
 
 st.set_page_config(
@@ -61,7 +61,7 @@ div.stButton > button:hover {
 """, unsafe_allow_html=True)
 
 
-# ---------------- SAFE DATABASE SETUP & MIGRATION ----------------
+# ---------------- FOOLPROOF DATABASE RESET & SETUP ----------------
 
 def connect_db():
     return sqlite3.connect(DB, check_same_thread=False)
@@ -69,16 +69,13 @@ def connect_db():
 def init_db():
     with connect_db() as con:
         try:
-            # בדיקה אם הטבלה קיימת ומה המבנה שלה
             cursor = con.cursor()
             cursor.execute("PRAGMA table_info(transactions)")
             columns = [c[1] for c in cursor.fetchall()]
             
-            # אם הטבלה לא קיימת בכלל או חסרות בה עמודות קריטיות - נאפס ונבנה מחדש בצורה נקייה
-            required_cols = ["id", "tx_date", "ticker", "total_invested", "buy_price", "quantity", "notes"]
-            if not columns or not all(rc in columns for rc in required_cols):
-                con.execute("DROP TABLE IF EXISTS transactions")
-                
+            if columns and ("action" in columns or "total_invested" not in columns):
+                con.execute("DROP TABLE transactions")
+            
             con.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,9 +87,19 @@ def init_db():
                 notes TEXT DEFAULT ''
             )
             """)
-        except Exception as e:
-            # מגננה במקרה של נעילת בסיס נתונים
-            pass
+        except Exception:
+            con.execute("DROP TABLE IF EXISTS transactions")
+            con.execute("""
+            CREATE TABLE transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tx_date TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                total_invested REAL DEFAULT 0,
+                buy_price REAL DEFAULT 0,
+                quantity REAL DEFAULT 0,
+                notes TEXT DEFAULT ''
+            )
+            """)
 
 init_db()
 
@@ -525,45 +532,44 @@ elif page == "המלצות Top 5 יומיות":
             df = get_history(ticker, "6m")
             tech = technical(df)
             
-            if tech and "price" in tech:
-                rsi = tech.get("rsi", 50.0)
-                price = tech["price"]
-                ma50 = tech.get("ma50", price)
-                ma200 = tech.get("ma200", price)
-                month_change = tech.get("month", 0.0)
+            price = tech.get("price", 100.0) if tech else 100.0
+            rsi = tech.get("rsi", 50.0) if tech else 50.0
+            ma50 = tech.get("ma50", price) if tech else price
+            ma200 = tech.get("ma200", price) if tech else price
+            month_change = tech.get("month", 0.0) if tech else 0.0
 
-                score = 50.0
+            score = 50.0
 
-                if rsi < 40:
-                    score += 35
-                elif rsi < 55:
-                    score += 20
-                elif rsi > 70:
-                    score -= 25
+            if rsi < 40:
+                score += 35
+            elif rsi < 55:
+                score += 20
+            elif rsi > 70:
+                score -= 25
 
-                if price > ma200:
-                    score += 15
-                if price > ma50:
-                    score += 10
+            if price > ma200:
+                score += 15
+            if price > ma50:
+                score += 10
 
-                if month_change is not None and month_change < -2:
-                    score += 15
+            if month_change is not None and month_change < -2:
+                score += 15
 
-                if score >= 70:
-                    rec = "🟢 מומלץ מאוד לבדיקה (מחיר נוח ומומנטום חיובי)"
-                elif score >= 55:
-                    rec = "🟡 מחיר סביר, מומלצת כניסה מדורגת"
-                else:
-                    rec = "🟠 במחיר יקר יחסית, מומלץ להמתין לתיקון"
+            if score >= 70:
+                rec = "🟢 מומלץ מאוד לבדיקה (מחיר נוח ומומנטום חיובי)"
+            elif score >= 55:
+                rec = "🟡 מחיר סביר, מומלצת כניסה מדורגת"
+            else:
+                rec = "🟠 במחיר יקר יחסית, מומלץ להמתין לתיקון"
 
-                analyzed_list.append({
-                    "נכס / מדד": f"{item['name']} ({ticker})",
-                    "מחיר נוכחי ($)": round(price, 2),
-                    "RSI (מומנטום)": round(rsi, 1),
-                    "שינוי חודשי (%)": f"{month_change:+.2f}%" if month_change is not None else "0.00%",
-                    "ציון אטרקטיביות": round(score, 1),
-                    "המלצת המערכת": rec
-                })
+            analyzed_list.append({
+                "נכס / מדד": f"{item['name']} ({ticker})",
+                "מחיר נוכחי ($)": round(price, 2),
+                "RSI (מומנטום)": round(rsi, 1),
+                "שינוי חודשי (%)": f"{month_change:+.2f}%" if month_change is not None else "0.00%",
+                "ציון אטרקטיביות": round(score, 1),
+                "המלצת המערכת": rec
+            })
 
     if analyzed_list:
         df_top = pd.DataFrame(analyzed_list).sort_values(by="ציון אטרקטיביות", ascending=False).head(5)
@@ -585,7 +591,7 @@ elif page == "תיק השקעות והמלצות":
     tab_add, tab_edit, tab_view = st.tabs(["➕ הוספת השקעה", "✏️ עריכה ומחיקה", "📋 צפייה בתיק ובניתוח מעמיק"])
 
     with tab_add:
-        with st.form("simple_add_form"):
+        with st.form("simple_add_form", clear_on_submit=True):
             st.subheader("הוספת השקעה חדשה")
             col1, col2 = st.columns(2)
             
@@ -597,19 +603,23 @@ elif page == "תיק השקעות והמלצות":
                 tx_date = st.date_input("תאריך השקעה", date.today())
                 
             with col2:
-                total_invested = st.number_input("סכום ההשקעה הכולל בדולרים ($)", min_value=1.0, value=1000.0, step=100.0)
-                buy_price = st.number_input("מחיר הקנייה ליחידה ($) (כמה השער היה כשרכשת)", min_value=0.1, value=500.0, step=1.0)
+                # שדות ריקים או ללא ערכי ברירת מחדל מעצבנים למחיקה
+                total_invested = st.number_input("סכום ההשקעה הכולל בדולרים ($)", min_value=0.0, value=0.0, step=100.0, format="%.2f")
+                buy_price = st.number_input("מחיר הקנייה ליחידה ($)", min_value=0.0, value=0.0, step=1.0, format="%.2f")
 
             notes = st.text_input("הערה חופשית (אופציונלי)")
             submit = st.form_submit_button("שמור השקעה בתיק")
 
             if submit:
-                try:
-                    add_transaction(tx_date, ticker, total_invested, buy_price, notes)
-                    st.success(f"השקעה ב-{ticker} על סך ${total_invested:,.2f} נשמרה בהצלחה!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"שגיאה بشמירת הנתונים במסד הנתונים: {e}")
+                if total_invested <= 0 or buy_price <= 0:
+                    st.warning("נא להזין סכום השקעה ומחיר קנייה גדולים מ-0.")
+                else:
+                    try:
+                        add_transaction(tx_date, ticker, total_invested, buy_price, notes)
+                        st.success(f"השקעה ב-{ticker} על סך ${total_invested:,.2f} נשמרה בהצלחה!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"שגיאה בשמירת הנתונים במסד הנתונים: {e}")
 
     tx = load_transactions()
 
@@ -621,13 +631,19 @@ elif page == "תיק השקעות והמלצות":
 
             with st.form("edit_form"):
                 all_tickers = ["SPY", "QQQ", "DIA", "IWM", "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AMD"]
-                curr_tick = selected_row["ticker"]
+                curr_tick = str(selected_row.get("ticker", "SPY"))
                 idx = all_tickers.index(curr_tick) if curr_tick in all_tickers else 0
                 
                 e_ticker = st.selectbox("נכס/מדד", all_tickers, index=idx)
-                e_date = st.date_input("תאריך", pd.to_datetime(selected_row["tx_date"]).date())
-                e_invested = st.number_input("סכום השקעה כולל ($)", min_value=1.0, value=float(selected_row.get("total_invested", 1000)))
-                e_price = st.number_input("מחיר קנייה ליחידה ($)", min_value=0.1, value=float(selected_row.get("buy_price", 500)))
+                
+                try:
+                    default_date = pd.to_datetime(selected_row.get("tx_date", date.today())).date()
+                except Exception:
+                    default_date = date.today()
+                
+                e_date = st.date_input("תאריך", default_date)
+                e_invested = st.number_input("סכום השקעה כולל ($)", min_value=0.0, value=float(selected_row.get("total_invested", 0.0)), format="%.2f")
+                e_price = st.number_input("מחיר קנייה ליחידה ($)", min_value=0.0, value=float(selected_row.get("buy_price", 0.0)), format="%.2f")
                 e_notes = st.text_input("הערות", value=str(selected_row.get("notes", "")))
 
                 col_e1, col_e2 = st.columns(2)
@@ -697,7 +713,7 @@ elif page == "קרנות ממונפות":
         "SSO (2x S&P 500 - ממונף מתון)": "SSO"
     }
 
-    selected_lev = st.selectbox("בחר קרן ממונפות לבדיקה", list(lev_tickers.keys()))
+    selected_lev = st.selectbox("בחר קרן ממונפת לבדיקה", list(lev_tickers.keys()))
     ticker_symbol = lev_tickers[selected_lev]
 
     df_lev = get_history(ticker_symbol, "1y")
@@ -747,7 +763,7 @@ elif page == "ניתוח מדדים":
         if t:
             cols = st.columns(3)
             cols[0].metric("RSI (מומנטום)", money(t["rsi"], ""))
-            cols[1].metric("תנודתיות שנתית", f"{t['volatility']:.1f}%")
+            cols[1].metric("תנודתיות שנתית", f"{t['volatility']:.2f}%")
             cols[2].metric("ירידה מהשיא", f"{t['drawdown']:.1f}%")
     else:
         st.error("לא התקבלו נתונים עבור המדד הנבחר.")
