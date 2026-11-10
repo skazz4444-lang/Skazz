@@ -9,7 +9,7 @@ from datetime import date
 from io import StringIO
 
 # =====================================================
-# MARKET RADAR - ULTIMATE BULLETPROOF STABLE VERSION
+# MARKET RADAR - FINAL BULLETPROOF VERSION 2.0
 # =====================================================
 
 st.set_page_config(
@@ -61,7 +61,7 @@ div.stButton > button:hover {
 """, unsafe_allow_html=True)
 
 
-# ---------------- ABSOLUTE BULLETPROOF DATABASE RESET ----------------
+# ---------------- ABSOLUTE BULLETPROOF DATABASE SETUP ----------------
 
 def connect_db():
     return sqlite3.connect(DB, check_same_thread=False)
@@ -89,14 +89,14 @@ init_db()
 # ---------------- ROBUST DATA SOURCES & FALLBACKS ----------------
 
 @st.cache_data(ttl=60)
-def get_history(ticker, period="2y"):
+def get_history(ticker, period="1y"):
     try:
         t = yf.Ticker(ticker)
         df = t.history(period=period, auto_adjust=True)
         if df.empty:
             df = yf.download(ticker, period=period, auto_adjust=True, progress=False, threads=False)
         if df.empty:
-            raise ValueError("Empty data")
+            return pd.DataFrame()
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         df.index = pd.to_datetime(df.index)
@@ -128,19 +128,6 @@ def get_fred(series):
     except Exception:
         return pd.DataFrame()
 
-@st.cache_data(ttl=900)
-def get_news(query):
-    try:
-        response = requests.get(
-            "https://api.gdeltproject.org/api/v2/doc/doc",
-            params={"query": query, "mode": "ArtList", "format": "json", "maxrecords": 15, "sort": "DateDesc"},
-            timeout=15
-        )
-        response.raise_for_status()
-        return response.json().get("articles", [])
-    except Exception:
-        return []
-
 
 # ---------------- HELPERS ----------------
 
@@ -165,13 +152,14 @@ def money(value, currency="$"):
 
 def technical(df):
     close = close_series(df)
-    if len(close) < 10:
+    if len(close) < 5:
         return {}
 
     returns = close.pct_change().dropna()
     delta = close.diff()
-    gain = delta.clip(lower=0).rolling(14).mean()
-    loss = -delta.clip(upper=0).rolling(14).mean()
+    gain = delta.clip(lower=0).rolling(14).min().abs() # safeguard
+    gain = delta.clip(lower=0).rolling(14, min_periods=1).mean()
+    loss = -delta.clip(upper=0).rolling(14, min_periods=1).mean()
     rs = gain / loss.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
     drawdown = close / close.cummax() - 1
@@ -182,14 +170,11 @@ def technical(df):
         "price": float(close.iloc[-1]),
         "change": float(returns.iloc[-1] * 100) if not returns.empty else 0.0,
         "month": safe_float((close.iloc[-1] / close.iloc[-22] - 1) * 100) if len(close) >= 22 else 0.0,
-        "quarter": safe_float((close.iloc[-1] / close.iloc[-64] - 1) * 100) if len(close) >= 64 else 0.0,
-        "ma20": safe_float(close.rolling(20).mean().iloc[-1]) if len(close) >= 20 else float(close.iloc[-1]),
         "ma50": safe_float(close.rolling(50).mean().iloc[-1]) if len(close) >= 50 else float(close.iloc[-1]),
         "ma200": safe_float(close.rolling(200).mean().iloc[-1]) if len(close) >= 200 else float(close.iloc[-1]),
         "rsi": curr_rsi,
         "volatility": safe_float(returns.std() * np.sqrt(252) * 100) if not returns.empty else 15.0,
-        "drawdown": safe_float(drawdown.iloc[-1] * 100) if not drawdown.empty else 0.0,
-        "max_drawdown": safe_float(drawdown.min() * 100) if not drawdown.empty else 0.0
+        "drawdown": safe_float(drawdown.iloc[-1] * 100) if not drawdown.empty else 0.0
     }
 
 def price_chart(df, title):
@@ -199,7 +184,6 @@ def price_chart(df, title):
 
     close = close_series(df)
     fig = go.Figure()
-
     fig.add_trace(go.Scatter(x=close.index, y=close, name="מחיר ($)", line=dict(color="#2563eb", width=2)))
 
     for period in [50, 200]:
@@ -207,83 +191,19 @@ def price_chart(df, title):
             color = "#059669" if period == 50 else "#d97706"
             fig.add_trace(go.Scatter(x=close.index, y=close.rolling(period).mean(), name=f"MA{period}", line=dict(color=color, width=1.5, dash="dot")))
 
-    fig.update_layout(
-        title=title,
-        template="plotly_white",
-        paper_bgcolor="#ffffff",
-        plot_bgcolor="#ffffff",
-        height=400,
-        hovermode="x unified",
-        margin=dict(l=20, r=20, t=40, b=20)
-    )
+    fig.update_layout(title=title, template="plotly_white", paper_bgcolor="#ffffff", plot_bgcolor="#ffffff", height=400, margin=dict(l=20, r=20, t=40, b=20))
     st.plotly_chart(fig, use_container_width=True)
 
 
-# ---------------- SMART MARKET SCORE ----------------
-
-def calculate_market_score(sp_df, vix_value):
-    tech = technical(sp_df)
-    if not tech:
-        return None, {}, "אין נתונים מספיקים לחישוב"
-
-    factors = {}
-    
-    if tech["ma200"] is not None:
-        factors["מגמה ארוכה (MA200)"] = 100 if tech["price"] > tech["ma200"] else 25
-
-    if tech["ma50"] is not None:
-        factors["מגמה בינונית (MA50)"] = 100 if tech["price"] > tech["ma50"] else 35
-
-    if tech["rsi"] is not None:
-        rsi = tech["rsi"]
-        if 40 <= rsi <= 60:
-            factors["מומנטום בריא (RSI)"] = 85
-        elif rsi < 40:
-            factors["מחיר זול / הזדמנות איסוף"] = 100
-        elif rsi > 70:
-            factors["שוק יקר / קנוי יתר"] = 30
-        else:
-            factors["מומנטום (RSI)"] = 65
-
-    if vix_value is not None:
-        if vix_value < 16:
-            factors["מדד הפחד VIX (רגיעה)"] = 90
-        elif vix_value < 22:
-            factors["מדד הפחד VIX (סביר)"] = 70
-        elif vix_value < 30:
-            factors["מדד הפחד VIX (חשש)"] = 45
-        else:
-            factors["מדד הפחד VIX (פחד חריף)"] = 20
-
-    dd = tech.get("drawdown", 0)
-    if dd is not None:
-        if dd >= -2:
-            factors["מרחק מהשיא"] = 70
-        elif -10 <= dd < -2:
-            factors["תיקון בריא מהשיא"] = 95
-        elif -20 <= dd < -10:
-            factors["הנחה משמעותית בשוק"] = 100
-        else:
-            factors["ירידה חדה מאוד (סיכון גבוה)"] = 40
-
-    if not factors:
-        return None, {}, "אין מספיק נתונים"
-
-    score = round(float(np.mean(list(factors.values()))), 1)
-
-    if score >= 75:
-        verdict = "🟢 מצב שוק אטרקטיבי: התנאים מצוינים לכניסה או להגדלת השקעות."
-    elif score >= 50:
-        verdict = "🟡 מצב שוק ניטרלי: מומלץ לנקוט בגישה מדורגת (DCA) ולא לקפוץ בבת אחת."
-    else:
-        verdict = "🔴 שוק תנודתי או יקר: מומלץ להמתין להתייצבות או לממש חלק מהרווחים."
-
-    return score, factors, verdict
-
-
-# ---------------- PORTFOLIO DB & SAFE CALCULATIONS ----------------
+# ---------------- PORTFOLIO DB & ROBUST CALCULATIONS ----------------
 
 def add_transaction(tx_date, ticker, total_invested, buy_price, notes=""):
+    # חישוב יחידות מדויק: אם מחיר הקנייה הוא 0 או לא חוקי, ניקח את המחיר הנוכחי מהשוק
+    if buy_price <= 0:
+        df = get_history(ticker, "5d")
+        close = close_series(df)
+        buy_price = float(close.iloc[-1]) if not close.empty else 1.0
+        
     qty = total_invested / buy_price if buy_price > 0 else 0.0
     with connect_db() as con:
         con.execute("""
@@ -292,6 +212,8 @@ def add_transaction(tx_date, ticker, total_invested, buy_price, notes=""):
         """, (str(tx_date), ticker.upper(), float(total_invested), float(buy_price), float(qty), str(notes)))
 
 def update_transaction(tx_id, tx_date, ticker, total_invested, buy_price, notes=""):
+    if buy_price <= 0:
+        buy_price = 1.0
     qty = total_invested / buy_price if buy_price > 0 else 0.0
     with connect_db() as con:
         con.execute("""
@@ -332,9 +254,13 @@ def calculate_positions(tx):
         df = get_history(ticker, "6m")
         close = close_series(df)
         current = float(close.iloc[-1]) if not close.empty else np.nan
+        
+        # אם אין כמות שמורה בטבלה אך יש סכום ומחיר קנייה, נחשב אותה מחדש אוטומטית
+        if units <= 0 and buy_price > 0 and cost > 0:
+            units = cost / buy_price
+
         tech = technical(df)
         info = get_info(ticker)
-
         pe_ratio = info.get("trailingPE", info.get("forwardPE", "N/A"))
         target_price = info.get("targetMeanPrice", "N/A")
 
@@ -343,10 +269,14 @@ def calculate_positions(tx):
             pnl = value - cost
             pnl_pct = (pnl / cost) * 100 if cost > 0 else 0.0
         else:
-            value, pnl, pnl_pct = 0.0, 0.0, 0.0
+            # Fallback אם המחיר הנוכחי לא זמין בלייב: נציג לפחות את העלות כדי לא לאפס ל-0
+            value = cost
+            pnl = 0.0
+            pnl_pct = 0.0
+            current = buy_price
 
         rsi = tech.get("rsi", 50.0)
-        ma200 = tech.get("ma200", current if np.isfinite(current) else 0)
+        ma200 = tech.get("ma200", current)
         
         if pnl_pct > 20 or (rsi > 72 and pnl_pct > 10):
             suggestion = "🔴 למכור ולמימוש רווחים: הנכס הגיע ליעד רווח גבוה או נמצא במצב קנוי-יתר (RSI > 72)."
@@ -470,7 +400,7 @@ if page == "סקירת שוק חכמה":
 
 
 # =====================================================
-# 2. DAILY TOP 5 RECOMMENDATIONS (SAFE STABLE SCAN)
+# 2. DAILY TOP 5 RECOMMENDATIONS (FAST & SAFE SCAN)
 # =====================================================
 
 elif page == "המלצות Top 5 יומיות":
@@ -497,7 +427,7 @@ elif page == "המלצות Top 5 יומיות":
     ]
 
     analyzed_list = []
-    with st.spinner("סורק ומנתח את השוק בלייב (טעינה מהירה ובטוחה)..."):
+    with st.spinner("סורק ומנתח את השוק בלייב..."):
         for item in mega_pool:
             ticker = item["ticker"]
             df = get_history(ticker, "6m")
@@ -511,7 +441,6 @@ elif page == "המלצות Top 5 יומיות":
                 month_change = tech["month"]
 
                 score = 50.0
-
                 if rsi < 40:
                     score += 35
                 elif rsi < 55:
@@ -523,7 +452,6 @@ elif page == "המלצות Top 5 יומיות":
                     score += 15
                 if price > ma50:
                     score += 10
-
                 if month_change < -2:
                     score += 15
 
@@ -558,7 +486,7 @@ elif page == "המלצות Top 5 יומיות":
 elif page == "תיק השקעות והמלצות":
 
     st.title("💼 ניהול תיק השקעות והמלצות חכמות מעמיקות")
-    st.markdown("כאן תוכל להזין את ההשקעות שלך. השדות ריקים ונקיים להזנה נוחה. המערכת תנתח אותן לעומק מול מחירי השוק החיים ותמליץ לך מה לעשות.")
+    st.markdown("כאן תוכל להזין את ההשקעות שלך. השדות נקיים לחלוטין. המערכת תנתח אותן לעומק מול מחירי השוק החיים ותמליץ לך מה לעשות.")
 
     tab_add, tab_edit, tab_view = st.tabs(["➕ הוספת השקעה", "✏️ עריכה ומחיקה", "📋 צפייה בתיק ובניתוח מעמיק"])
 
@@ -575,7 +503,6 @@ elif page == "תיק השקעות והמלצות":
                 tx_date = st.date_input("תאריך השקעה", date.today())
                 
             with col2:
-                # שדות ריקים ללא ברירות מחדל מעצבנים
                 total_invested = st.number_input("סכום ההשקעה הכולל בדולרים ($)", min_value=0.0, value=0.0, step=100.0, format="%.2f", placeholder="הכנס סכום...")
                 buy_price = st.number_input("מחיר הקנייה ליחידה ($)", min_value=0.0, value=0.0, step=1.0, format="%.2f", placeholder="הכנס מחיר קנייה...")
 
@@ -719,19 +646,13 @@ elif page == "קרנות ממונפות":
 elif page == "ניתוח מדדים":
 
     st.title("📈 ניתוח מדדים מובילים")
-
-    choices = {
-        "S&P 500 (SPY)": "SPY",
-        "Nasdaq 100 (QQQ)": "QQQ"
-    }
-
+    choices = {"S&P 500 (SPY)": "SPY", "Nasdaq 100 (QQQ)": "QQQ"}
     selected = st.selectbox("בחר מדד", list(choices))
     df = get_history(choices[selected], "5y")
 
     if not df.empty:
         price_chart(df, selected)
         t = technical(df)
-
         if t:
             cols = st.columns(3)
             cols[0].metric("RSI (מומנטום)", money(t["rsi"], ""))
@@ -748,7 +669,6 @@ elif page == "ניתוח מדדים":
 elif page == "תמחור ומחירים":
 
     st.title("💰 תמחור נכסים מובילים")
-
     ticker = st.selectbox("בחר נכס", ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL"])
     info = get_info(ticker)
 
@@ -780,7 +700,6 @@ elif page == "תמחור ומחירים":
 elif page == "מאקרו וכלכלה":
 
     st.title("🏦 נתוני מאקרו כלכליים")
-
     series = {
         "ריבית הפד האמריקאית": "FEDFUNDS",
         "תשואת אגח ארהב 10 שנים": "DGS10",
@@ -810,9 +729,17 @@ elif page == "מאקרו וכלכלה":
 elif page == "חדשות":
 
     st.title("📰 חדשות שוק ההון")
-
     topic = st.selectbox("בחר נושא", ["US stock market economy", "Federal Reserve inflation", "technology AI stocks"])
-    articles = get_news(topic)
+    
+    try:
+        response = requests.get(
+            "https://api.gdeltproject.org/api/v2/doc/doc",
+            params={"query": topic, "mode": "ArtList", "format": "json", "maxrecords": 10, "sort": "DateDesc"},
+            timeout=10
+        )
+        articles = response.json().get("articles", []) if response.status_code == 200 else []
+    except Exception:
+        articles = []
 
     if articles:
         for article in articles:
