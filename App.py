@@ -9,7 +9,7 @@ from datetime import date
 from io import StringIO
 
 # =====================================================
-# MARKET RADAR - FINAL BULLETPROOF VERSION
+# MARKET RADAR - ULTIMATE BULLETPROOF STABLE VERSION
 # =====================================================
 
 st.set_page_config(
@@ -69,10 +69,8 @@ def connect_db():
 def init_db():
     with connect_db() as con:
         try:
-            # איפוס מוחלט ובניית הטבלה מחדש כדי למנוע כל שגיאת מבנה או ערכים פגומים עתידיים
-            con.execute("DROP TABLE IF EXISTS transactions")
             con.execute("""
-            CREATE TABLE transactions (
+            CREATE TABLE IF NOT EXISTS transactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tx_date TEXT NOT NULL,
                 ticker TEXT NOT NULL,
@@ -93,7 +91,10 @@ init_db()
 @st.cache_data(ttl=60)
 def get_history(ticker, period="2y"):
     try:
-        df = yf.download(ticker, period=period, auto_adjust=True, progress=False, threads=False)
+        t = yf.Ticker(ticker)
+        df = t.history(period=period, auto_adjust=True)
+        if df.empty:
+            df = yf.download(ticker, period=period, auto_adjust=True, progress=False, threads=False)
         if df.empty:
             raise ValueError("Empty data")
         if isinstance(df.columns, pd.MultiIndex):
@@ -101,14 +102,6 @@ def get_history(ticker, period="2y"):
         df.index = pd.to_datetime(df.index)
         return df.dropna()
     except Exception:
-        try:
-            t = yf.Ticker(ticker)
-            df = t.history(period=period)
-            if not df.empty:
-                df.index = pd.to_datetime(df.index)
-                return df.dropna()
-        except Exception:
-            pass
         return pd.DataFrame()
 
 @st.cache_data(ttl=1800)
@@ -172,7 +165,7 @@ def money(value, currency="$"):
 
 def technical(df):
     close = close_series(df)
-    if len(close) < 14:
+    if len(close) < 10:
         return {}
 
     returns = close.pct_change().dropna()
@@ -477,15 +470,14 @@ if page == "סקירת שוק חכמה":
 
 
 # =====================================================
-# 2. DAILY TOP 5 RECOMMENDATIONS (ULTRA-WIDE MARKET SCAN)
+# 2. DAILY TOP 5 RECOMMENDATIONS (SAFE STABLE SCAN)
 # =====================================================
 
 elif page == "המלצות Top 5 יומיות":
 
     st.title("⭐ המלצות Top 5 יומיות להשקעה")
-    st.markdown("סריקה מקיפה ועמוקה של **עשרות** מניות מובילות, מדדים וקרנות סל חמות בשוק האמריקאי. המערכת מנתחת מומנטום, ממוצעים ותיקונים ומציגה את ה-5 המשתלמים ביותר כרגע.")
+    st.markdown("סריקה מקיפה ובטוחה של מדדים מובילים, קרנות סל ומניות ענק. המערכת מנתחת את כל הפרמטרים ומציגה את ה-5 המובילים כרגע.")
 
-    # סל ענק הכולל את כל סוגי הנכסים החמים בשוק
     mega_pool = [
         {"name": "S&P 500 ETF", "ticker": "SPY"},
         {"name": "Nasdaq 100 ETF", "ticker": "QQQ"},
@@ -501,14 +493,11 @@ elif page == "המלצות Top 5 יומיות":
         {"name": "Tesla", "ticker": "TSLA"},
         {"name": "AMD", "ticker": "AMD"},
         {"name": "Broadcom", "ticker": "AVGO"},
-        {"name": "Netflix", "ticker": "NFLX"},
-        {"name": "JPMorgan Chase", "ticker": "JPM"},
-        {"name": "Berkshire Hathaway", "ticker": "BRK-B"},
-        {"name": "Palantir", "ticker": "PLTR"}
+        {"name": "Netflix", "ticker": "NFLX"}
     ]
 
     analyzed_list = []
-    with st.spinner("סורק ומנתח את כל נכסי השוק והמדדים החמים בלייב..."):
+    with st.spinner("סורק ומנתח את השוק בלייב (טעינה מהירה ובטוחה)..."):
         for item in mega_pool:
             ticker = item["ticker"]
             df = get_history(ticker, "6m")
@@ -536,7 +525,7 @@ elif page == "המלצות Top 5 יומיות":
                     score += 10
 
                 if month_change < -2:
-                    score += 15  # בונוס על תיקון בריא/הנחה זמנית
+                    score += 15
 
                 if score >= 70:
                     rec = "🟢 מומלץ מאוד לבדיקה (מחיר נוח ומומנטום חיובי)"
@@ -557,9 +546,9 @@ elif page == "המלצות Top 5 יומיות":
     if analyzed_list:
         df_top = pd.DataFrame(analyzed_list).sort_values(by="ציון אטרקטיביות", ascending=False).head(5)
         st.dataframe(df_top.drop(columns=["ציון אטרקטיביות"]), use_container_width=True)
-        st.info("💡 רשימת ה-Top 5 נבחרת ומתעדכנת אוטומטית מתוך כלל המדדים, קרנות הסל ומניות הענק הנסרקים.")
+        st.info("💡 רשימת ה-Top 5 נבחרת אוטומטית בכל יום מתוך הנכסים הנסרקים בשוק.")
     else:
-        st.warning("טוען נתונים... במידת הצורך לחץ על 'רענון נתונים בלייב' בסרגל הצד.")
+        st.warning("לא התקבלו נתונים כרגע. לחץ על 'רענון נתונים בלייב' בסרגל הצד.")
 
 
 # =====================================================
@@ -569,13 +558,13 @@ elif page == "המלצות Top 5 יומיות":
 elif page == "תיק השקעות והמלצות":
 
     st.title("💼 ניהול תיק השקעות והמלצות חכמות מעמיקות")
-    st.markdown("כאן תוכל להזין את ההשקעות שלך, לערוך אותן או למחוק אותן. המערכת תנתח אותן לעומק מול מחירי השוק, מכפילים, תחזיות ומדד הפחד כדי להמליץ לך בדיוק מה לעשות עם הכסף.")
+    st.markdown("כאן תוכל להזין את ההשקעות שלך. השדות ריקים ונקיים להזנה נוחה. המערכת תנתח אותן לעומק מול מחירי השוק החיים ותמליץ לך מה לעשות.")
 
     tab_add, tab_edit, tab_view = st.tabs(["➕ הוספת השקעה", "✏️ עריכה ומחיקה", "📋 צפייה בתיק ובניתוח מעמיק"])
 
     with tab_add:
-        with st.form("simple_add_form", clear_on_submit=True):
-            st.subheader("הוספת השקעה חדשה")
+        with st.form("clean_add_form", clear_on_submit=True):
+            st.subheader("הוספת השקעה חדשה לתיק")
             col1, col2 = st.columns(2)
             
             with col1:
@@ -586,15 +575,16 @@ elif page == "תיק השקעות והמלצות":
                 tx_date = st.date_input("תאריך השקעה", date.today())
                 
             with col2:
-                total_invested = st.number_input("סכום ההשקעה הכולל בדולרים ($)", min_value=0.0, value=0.0, step=100.0, format="%.2f")
-                buy_price = st.number_input("מחיר הקנייה ליחידה ($)", min_value=0.0, value=0.0, step=1.0, format="%.2f")
+                # שדות ריקים ללא ברירות מחדל מעצבנים
+                total_invested = st.number_input("סכום ההשקעה הכולל בדולרים ($)", min_value=0.0, value=0.0, step=100.0, format="%.2f", placeholder="הכנס סכום...")
+                buy_price = st.number_input("מחיר הקנייה ליחידה ($)", min_value=0.0, value=0.0, step=1.0, format="%.2f", placeholder="הכנס מחיר קנייה...")
 
             notes = st.text_input("הערה חופשית (אופציונלי)")
             submit = st.form_submit_button("שמור השקעה בתיק")
 
             if submit:
                 if total_invested <= 0 or buy_price <= 0:
-                    st.warning("נא להזין סכום השקעה ומחיר קנייה גדולים מ-0.")
+                    st.warning("נא להזין סכום השקעה ומחיר קנייה הגדולים מ-0.")
                 else:
                     try:
                         add_transaction(tx_date, ticker, total_invested, buy_price, notes)
@@ -657,7 +647,7 @@ elif page == "תיק השקעות והמלצות":
 
             positions = calculate_positions(tx)
 
-            st.subheader("📊 ניתוח מעמיק, סטטיסטיקות והמלצות פעולה לתיק שלך")
+            st.subheader("📊 פוזיציות פתוחות, ניתוח מעמיק והמלצות מערכת")
             st.dataframe(positions, use_container_width=True)
 
             valid_vals = positions.dropna(subset=["שווי עדכני ($)"]) if "שווי עדכני ($)" in positions.columns else pd.DataFrame()
@@ -676,7 +666,7 @@ elif page == "תיק השקעות והמלצות":
                 fig.update_layout(title="פיזור נכסים בתיק ($)", template="plotly_white", paper_bgcolor="#ffffff", plot_bgcolor="#ffffff")
                 st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("עדיין לא הוזנו השקעות לתיק. עבור ללשונית 'הוספת השקעה' כדי להתחיל.")
+            st.info("עדיין לא הוזנו השקעות לתיק. עבור ללשונית 'הוספת השקעה' כדי להזין את העסקה הראשונה שלך.")
 
 
 # =====================================================
