@@ -9,7 +9,7 @@ from datetime import date
 from io import StringIO
 
 # =====================================================
-# MARKET RADAR PRO - ULTIMATE FULL VERSION (10 TABS)
+# MARKET RADAR PRO - FULL PROFESSIONAL VERSION (10 TABS)
 # =====================================================
 
 st.set_page_config(
@@ -61,27 +61,37 @@ div.stButton > button:hover {
 """, unsafe_allow_html=True)
 
 
-# ---------------- DATABASE SETUP ----------------
+# ---------------- DATABASE SETUP & SEEDING ----------------
 
 def connect_db():
     return sqlite3.connect(DB, check_same_thread=False)
 
 def init_db():
     with connect_db() as con:
-        try:
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tx_date TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            total_invested REAL DEFAULT 0,
+            buy_price REAL DEFAULT 0,
+            quantity REAL DEFAULT 0,
+            notes TEXT DEFAULT ''
+        )
+        """)
+        # בדיקה אם התיק ריק - ואם כן, טעינה אוטומטית של ההשקעה שלך ב-QQQ
+        cursor = con.cursor()
+        cursor.execute("SELECT COUNT(*) FROM transactions")
+        count = cursor.fetchone()[0]
+        if count == 0:
+            invested = 500.0
+            buy_price = 674.71
+            qty = invested / buy_price
             con.execute("""
-            CREATE TABLE IF NOT EXISTS transactions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tx_date TEXT NOT NULL,
-                ticker TEXT NOT NULL,
-                total_invested REAL DEFAULT 0,
-                buy_price REAL DEFAULT 0,
-                quantity REAL DEFAULT 0,
-                notes TEXT DEFAULT ''
-            )
-            """)
-        except Exception:
-            pass
+            INSERT INTO transactions (tx_date, ticker, total_invested, buy_price, quantity, notes)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """, (str(date.today()), "QQQ", invested, buy_price, qty, "השקעה ראשונית ב-QQQ"))
+            con.commit()
 
 init_db()
 
@@ -248,29 +258,28 @@ def calculate_positions(tx):
         tx_date = row["tx_date"]
         cost = safe_float(row.get("total_invested", 0))
         buy_price = safe_float(row.get("buy_price", 0))
-        units = safe_float(row.get("quantity", 0))
+        qty = safe_float(row.get("quantity", 0))
         notes = str(row.get("notes", ""))
 
         df = get_history(ticker, "6m")
         close = close_series(df)
         current = float(close.iloc[-1]) if not close.empty else np.nan
         
-        # חישוב כמויות מדויק ואוטומטי בלייב
-        if units <= 0:
+        if qty <= 0:
             if buy_price > 0 and cost > 0:
-                units = cost / buy_price
+                qty = cost / buy_price
             elif current > 0 and cost > 0:
-                units = cost / current
+                qty = cost / current
             else:
-                units = 1.0
+                qty = 1.0
 
         tech = technical(df)
         info = get_info(ticker)
         pe_ratio = info.get("trailingPE", info.get("forwardPE", "N/A"))
         target_price = info.get("targetMeanPrice", "N/A")
 
-        if np.isfinite(current) and units > 0:
-            value = current * units
+        if np.isfinite(current) and qty > 0:
+            value = current * qty
             pnl = value - cost
             pnl_pct = (pnl / cost) * 100 if cost > 0 else 0.0
         else:
@@ -282,7 +291,6 @@ def calculate_positions(tx):
         rsi = tech.get("rsi", 50.0)
         ma200 = tech.get("ma200", current)
         
-        # מנוע המלצות אקטיבי מבוסס נתונים
         if pnl_pct > 20 or (rsi > 72 and pnl_pct > 10):
             suggestion = "🔴 למכור ולמימוש רווחים: הנכס הגיע ליעד רווח גבוה או נמצא במצב קנוי-יתר (RSI > 72)."
         elif pnl_pct < -10 and (rsi < 45 or vix_val > 22):
@@ -297,7 +305,8 @@ def calculate_positions(tx):
             "תאריך": tx_date,
             "נכס/מדד": ticker,
             "סכום שהושקע ($)": round(cost, 2),
-            "מחיר קנייה ($)": round(buy_price, 2) if buy_price > 0 else round(current, 2),
+            "מחיר קנייה ($)": round(buy_price, 2),
+            "כמות יחידות": round(qty, 4),
             "מחיר נוכחי בלייב ($)": round(current, 2) if np.isfinite(current) else 0.0,
             "שווי עדכני ($)": round(value, 2),
             "רווח/הפסד ($)": round(pnl, 2),
@@ -348,7 +357,7 @@ st.sidebar.caption("הנתונים מתעדכנים ישירות משערי הש
 
 if page == "תיק השקעות והמלצות":
     st.title("💼 ניהול תיק השקעות והמלצות חכמות מעמיקות")
-    st.markdown("כאן תוכל לנהל את התיק שלך. השדות נקיים לחלוטין להזנה נוחה. המערכת שולפת את שערי השוק בלייב ומנתחת את התיק לעומק.")
+    st.markdown("כאן תוכל לנהל את התיק שלך לפי שערי הקנייה האמיתיים שלך מול שערי השוק בלייב.")
 
     tab_add, tab_edit, tab_view = st.tabs(["➕ הוספת השקעה", "✏️ עריכה ומחיקה", "📋 צפייה וניתוח התיק"])
 
@@ -357,11 +366,11 @@ if page == "תיק השקעות והמלצות":
             st.subheader("הוספת השקעה חדשה לתיק")
             col1, col2 = st.columns(2)
             with col1:
-                ticker = st.selectbox("בחר מדד / נכס", ["SPY", "QQQ", "DIA", "IWM", "VTI", "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA"])
+                ticker = st.selectbox("בחר מדד / נכס", ["QQQ", "SPY", "DIA", "IWM", "VTI", "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA"])
                 tx_date = st.date_input("תאריך השקעה", date.today())
             with col2:
-                total_invested = st.number_input("סכום ההשקעה הכולל ($)", min_value=0.0, value=0.0, step=100.0, format="%.2f", placeholder="הכנס סכום...")
-                buy_price = st.number_input("מחיר קנייה ליחידה ($) [השאר 0 לזיהוי אוטומטי]", min_value=0.0, value=0.0, step=1.0, format="%.2f", placeholder="הכנס מחיר קנייה...")
+                total_invested = st.number_input("סכום ההשקעה הכולל ($)", min_value=0.0, value=100.0, step=50.0, format="%.2f")
+                buy_price = st.number_input("מחיר קנייה ליחידה ($)", min_value=0.0, value=0.0, step=1.0, format="%.2f")
             notes = st.text_input("הערות (אופציונלי)")
             submit = st.form_submit_button("שמור השקעה בתיק")
 
@@ -382,8 +391,8 @@ if page == "תיק השקעות והמלצות":
             selected_row = tx[tx["id"] == edit_id].iloc[0]
 
             with st.form("edit_form"):
-                all_tickers = ["SPY", "QQQ", "DIA", "IWM", "VTI", "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]
-                curr_tick = str(selected_row.get("ticker", "SPY"))
+                all_tickers = ["QQQ", "SPY", "DIA", "IWM", "VTI", "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]
+                curr_tick = str(selected_row.get("ticker", "QQQ"))
                 idx = all_tickers.index(curr_tick) if curr_tick in all_tickers else 0
                 
                 e_ticker = st.selectbox("נכס/מדד", all_tickers, index=idx)
