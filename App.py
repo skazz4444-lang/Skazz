@@ -68,29 +68,31 @@ def connect_db():
 
 def init_db():
     with connect_db() as con:
-        con.execute("""
-        CREATE TABLE IF NOT EXISTS transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tx_date TEXT NOT NULL,
-            ticker TEXT NOT NULL,
-            total_invested REAL DEFAULT 0,
-            buy_price REAL DEFAULT 0,
-            quantity REAL DEFAULT 0,
-            notes TEXT DEFAULT ''
-        )
-        """)
-        # וידוא קיום עמודות למניעת שגיאות מבנה
-        cursor = con.cursor()
-        cursor.execute("PRAGMA table_info(transactions)")
-        cols = [c[1] for c in cursor.fetchall()]
-        if "total_invested" not in cols:
-            con.execute("ALTER TABLE transactions ADD COLUMN total_invested REAL DEFAULT 0")
-        if "buy_price" not in cols:
-            con.execute("ALTER TABLE transactions ADD COLUMN buy_price REAL DEFAULT 0")
-        if "quantity" not in cols:
-            con.execute("ALTER TABLE transactions ADD COLUMN quantity REAL DEFAULT 0")
-        if "notes" not in cols:
-            con.execute("ALTER TABLE transactions ADD COLUMN notes TEXT DEFAULT ''")
+        try:
+            # בדיקה אם הטבלה קיימת ומה המבנה שלה
+            cursor = con.cursor()
+            cursor.execute("PRAGMA table_info(transactions)")
+            columns = [c[1] for c in cursor.fetchall()]
+            
+            # אם הטבלה לא קיימת בכלל או חסרות בה עמודות קריטיות - נאפס ונבנה מחדש בצורה נקייה
+            required_cols = ["id", "tx_date", "ticker", "total_invested", "buy_price", "quantity", "notes"]
+            if not columns or not all(rc in columns for rc in required_cols):
+                con.execute("DROP TABLE IF EXISTS transactions")
+                
+            con.execute("""
+            CREATE TABLE IF NOT EXISTS transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tx_date TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                total_invested REAL DEFAULT 0,
+                buy_price REAL DEFAULT 0,
+                quantity REAL DEFAULT 0,
+                notes TEXT DEFAULT ''
+            )
+            """)
+        except Exception as e:
+            # מגננה במקרה של נעילת בסיס נתונים
+            pass
 
 init_db()
 
@@ -330,7 +332,6 @@ def calculate_positions(tx):
     if tx.empty:
         return pd.DataFrame()
 
-    # שליפת מדד הפחד VIX בלייב לצורך שקלול עמוק
     vix_df = get_history("^VIX", "5d")
     vix_close = close_series(vix_df)
     vix_val = float(vix_close.iloc[-1]) if not vix_close.empty else 20.0
@@ -351,7 +352,6 @@ def calculate_positions(tx):
         tech = technical(df)
         info = get_info(ticker)
 
-        # שליפת מכפילים ותחזיות אנליסטים במידה וקיימים
         pe_ratio = info.get("trailingPE", info.get("forwardPE", "N/A"))
         target_price = info.get("targetMeanPrice", "N/A")
 
@@ -365,7 +365,6 @@ def calculate_positions(tx):
         rsi = tech.get("rsi", 50.0)
         ma200 = tech.get("ma200", current if np.isfinite(current) else 0)
         
-        # 🧠 מנוע המלצות עמוק ומרובה פרמטרים
         if np.isfinite(current) and np.isfinite(pnl_pct):
             above_ma200 = current > ma200 if ma200 else True
             
@@ -388,7 +387,7 @@ def calculate_positions(tx):
             "מחיר קנייה ($)": round(buy_price, 2),
             "מחיר נוכחי בלייב ($)": round(current, 2) if np.isfinite(current) else "לא זמין",
             "שווי עדכני ($)": round(value, 2) if np.isfinite(value) else "לא זמין",
-            "רווח/הפסд ($)": round(pnl, 2) if np.isfinite(pnl) else "לא זמין",
+            "רווח/הפסד ($)": round(pnl, 2) if np.isfinite(pnl) else "לא זמין",
             "תשואה (%)": f"{pnl_pct:+.2f}%" if np.isfinite(pnl_pct) else "לא זמין",
             "מכפיל רווח P/E": round(float(pe_ratio), 2) if isinstance(pe_ratio, (int, float)) else "לא זמין",
             "יעד אנליסטים ($)": f"${target_price:,.2f}" if isinstance(target_price, (int, float)) else "לא זמין",
@@ -501,7 +500,6 @@ elif page == "המלצות Top 5 יומיות":
     st.title("⭐ המלצות Top 5 יומיות להשקעה")
     st.markdown("סריקה מקיפה של **כל** המדדים, קרנות הסל ומניות הענק המרכזיות. המערכת מעבדת את כל הפרמטרים הטכניים והפונדמנטליים ומציגה מדי יום את 5 הנכסים המובילים.")
 
-    # סל רחב ועשיר של מדדים, קרנות סל ומניות לבדיקה מלאה
     extended_pool = [
         {"name": "S&P 500 ETF", "ticker": "SPY"},
         {"name": "Nasdaq 100 ETF", "ticker": "QQQ"},
@@ -534,7 +532,6 @@ elif page == "המלצות Top 5 יומיות":
                 ma200 = tech.get("ma200", price)
                 month_change = tech.get("month", 0.0)
 
-                # שקלול אלגוריתמי עמוק לכל נכס בסל
                 score = 50.0
 
                 if rsi < 40:
@@ -550,7 +547,7 @@ elif page == "המלצות Top 5 יומיות":
                     score += 10
 
                 if month_change is not None and month_change < -2:
-                    score += 15  # בונוס על תיקון/הנחה זמנית
+                    score += 15
 
                 if score >= 70:
                     rec = "🟢 מומלץ מאוד לבדיקה (מחיר נוח ומומנטום חיובי)"
@@ -607,9 +604,12 @@ elif page == "תיק השקעות והמלצות":
             submit = st.form_submit_button("שמור השקעה בתיק")
 
             if submit:
-                add_transaction(tx_date, ticker, total_invested, buy_price, notes)
-                st.success(f"השקעה ב-{ticker} על סך ${total_invested:,.2f} נשמרה בהצלחה!")
-                st.rerun()
+                try:
+                    add_transaction(tx_date, ticker, total_invested, buy_price, notes)
+                    st.success(f"השקעה ב-{ticker} על סך ${total_invested:,.2f} נשמרה בהצלחה!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"שגיאה بشמירת הנתונים במסד הנתונים: {e}")
 
     tx = load_transactions()
 
@@ -697,7 +697,7 @@ elif page == "קרנות ממונפות":
         "SSO (2x S&P 500 - ממונף מתון)": "SSO"
     }
 
-    selected_lev = st.selectbox("בחר קרן ממונפת לבדיקה", list(lev_tickers.keys()))
+    selected_lev = st.selectbox("בחר קרן ממונפות לבדיקה", list(lev_tickers.keys()))
     ticker_symbol = lev_tickers[selected_lev]
 
     df_lev = get_history(ticker_symbol, "1y")
@@ -747,8 +747,8 @@ elif page == "ניתוח מדדים":
         if t:
             cols = st.columns(3)
             cols[0].metric("RSI (מומנטום)", money(t["rsi"], ""))
-            cols[1].metric("תנודתיות שנתית", f"{t['volatility']:.2f}%")
-            cols[2].metric("ירידה מהשיא", f"{t['drawdown']:.2f}%")
+            cols[1].metric("תנודתיות שנתית", f"{t['volatility']:.1f}%")
+            cols[2].metric("ירידה מהשיא", f"{t['drawdown']:.1f}%")
     else:
         st.error("לא התקבלו נתונים עבור המדד הנבחר.")
 
@@ -893,4 +893,4 @@ elif page == "Backtesting":
 # =====================================================
 
 st.markdown("---")
-st.caption("Market Radar | כלי לניתוח וניהול השקעות בלייב ($). התוכן אינו מהווה ייעוץ השקעות פיננסי.")
+st.caption("Market Radar | כלי לניתוח וניהול השקעות בלייב ($). התוכן הינו לימודי ואינו מהווה ייעוץ השקעות פיננסי.")
