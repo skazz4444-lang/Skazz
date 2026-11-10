@@ -9,7 +9,7 @@ from datetime import date
 from io import StringIO
 
 # =====================================================
-# MARKET RADAR - FINAL BULLETPROOF VERSION 2.0
+# MARKET RADAR - FINAL BULLETPROOF VERSION 3.0
 # =====================================================
 
 st.set_page_config(
@@ -111,23 +111,6 @@ def get_info(ticker):
     except Exception:
         return {}
 
-@st.cache_data(ttl=3600)
-def get_fred(series):
-    try:
-        url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series}"
-        response = requests.get(url, timeout=15)
-        response.raise_for_status()
-        df = pd.read_csv(StringIO(response.text))
-        if len(df.columns) < 2:
-            return pd.DataFrame()
-        df = df.iloc[:, :2]
-        df.columns = ["date", "value"]
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
-        df["value"] = pd.to_numeric(df["value"], errors="coerce")
-        return df.dropna().sort_values("date")
-    except Exception:
-        return pd.DataFrame()
-
 
 # ---------------- HELPERS ----------------
 
@@ -157,7 +140,6 @@ def technical(df):
 
     returns = close.pct_change().dropna()
     delta = close.diff()
-    gain = delta.clip(lower=0).rolling(14).min().abs() # safeguard
     gain = delta.clip(lower=0).rolling(14, min_periods=1).mean()
     loss = -delta.clip(upper=0).rolling(14, min_periods=1).mean()
     rs = gain / loss.replace(0, np.nan)
@@ -198,7 +180,6 @@ def price_chart(df, title):
 # ---------------- PORTFOLIO DB & ROBUST CALCULATIONS ----------------
 
 def add_transaction(tx_date, ticker, total_invested, buy_price, notes=""):
-    # חישוב יחידות מדויק: אם מחיר הקנייה הוא 0 או לא חוקי, ניקח את המחיר הנוכחי מהשוק
     if buy_price <= 0:
         df = get_history(ticker, "5d")
         close = close_series(df)
@@ -255,9 +236,10 @@ def calculate_positions(tx):
         close = close_series(df)
         current = float(close.iloc[-1]) if not close.empty else np.nan
         
-        # אם אין כמות שמורה בטבלה אך יש סכום ומחיר קנייה, נחשב אותה מחדש אוטומטית
         if units <= 0 and buy_price > 0 and cost > 0:
             units = cost / buy_price
+        elif units <= 0 and current > 0 and cost > 0:
+            units = cost / current
 
         tech = technical(df)
         info = get_info(ticker)
@@ -269,11 +251,10 @@ def calculate_positions(tx):
             pnl = value - cost
             pnl_pct = (pnl / cost) * 100 if cost > 0 else 0.0
         else:
-            # Fallback אם המחיר הנוכחי לא זמין בלייב: נציג לפחות את העלות כדי לא לאפס ל-0
             value = cost
             pnl = 0.0
             pnl_pct = 0.0
-            current = buy_price
+            current = buy_price if buy_price > 0 else 100.0
 
         rsi = tech.get("rsi", 50.0)
         ma200 = tech.get("ma200", current)
@@ -486,7 +467,7 @@ elif page == "המלצות Top 5 יומיות":
 elif page == "תיק השקעות והמלצות":
 
     st.title("💼 ניהול תיק השקעות והמלצות חכמות מעמיקות")
-    st.markdown("כאן תוכל להזין את ההשקעות שלך. השדות נקיים לחלוטין. המערכת תנתח אותן לעומק מול מחירי השוק החיים ותמליץ לך מה לעשות.")
+    st.markdown("כאן תוכל להזין את ההשקעות שלך. השדות נקיים לחלוטין. המערכת מנתחת אותן לעומק מול מחירי השוק החיים ומציגה החלטות ניהול מדויקות.")
 
     tab_add, tab_edit, tab_view = st.tabs(["➕ הוספת השקעה", "✏️ עריכה ומחיקה", "📋 צפייה בתיק ובניתוח מעמיק"])
 
@@ -510,8 +491,8 @@ elif page == "תיק השקעות והמלצות":
             submit = st.form_submit_button("שמור השקעה בתיק")
 
             if submit:
-                if total_invested <= 0 or buy_price <= 0:
-                    st.warning("נא להזין סכום השקעה ומחיר קנייה הגדולים מ-0.")
+                if total_invested <= 0:
+                    st.warning("נא להזין סכום השקעה גדול מ-0.")
                 else:
                     try:
                         add_transaction(tx_date, ticker, total_invested, buy_price, notes)
