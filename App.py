@@ -20,8 +20,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🎯 יועץ כניסה ויציאה חכם למדדים (בגיבוי כפול)")
-st.caption(f"עדכון חי: {datetime.now().strftime('%H:%M:%S')} | מנגנון שרידות וספקי נתונים כפולים")
+st.title("🎯 יועץ כניסה ויציאה חכם למדדים")
+st.caption(f"עדכון חי: {datetime.now().strftime('%H:%M:%S')} | ניהול תיק מתקדם וספקי גיבוי")
 
 # הגדרת מאקרו גלובלית (סיכון פוליטי / ביטחוני)
 st.markdown("### 🌐 הגדרות מאקרו וגאופוליטיקה")
@@ -34,7 +34,6 @@ geo_risk = st.select_slider(
 # --- פונקציית שליפת נתונים חכמה הכוללת ספקי גיבוי (Yahoo + Stooq) ---
 @st.cache_data(ttl=10)
 def fetch_market_with_fallback(yahoo_ticker, stooq_symbol):
-    # 1 ניסיון: ספק ראשי Yahoo Finance
     try:
         t = yf.Ticker(yahoo_ticker)
         hist = t.history(period="1y")
@@ -44,7 +43,6 @@ def fetch_market_with_fallback(yahoo_ticker, stooq_symbol):
     except Exception:
         pass
 
-    # 2 ניסיון: ספק גיבוי Stooq (ללא צורך במפתח API)
     try:
         stooq_url = f"https://stooq.com/q/d/l/?s={stooq_symbol}&i=d"
         df = pd.read_csv(stooq_url)
@@ -52,7 +50,6 @@ def fetch_market_with_fallback(yahoo_ticker, stooq_symbol):
             df['Date'] = pd.to_datetime(df['Date'])
             df.set_index('Date', inplace=True)
             df = df.sort_index()
-            # יצירת מבנה מידע בסיסי חלופי עבור הגיבוי
             fallback_info = {
                 'trailingPE': 22.5, 
                 'forwardPE': 21.0, 
@@ -117,35 +114,28 @@ else:
         # אלגוריתם שקלול ציון הכניסה (0-100)
         score = 50
 
-        # 1. מדד הפחד VIX
         if current_vix > 30: score += 20
         elif current_vix > 22: score += 12
         elif current_vix < 14: score -= 10
 
-        # 2. עומק תיקון מחיר (Drawdown)
         if drawdown < -15: score += 20
         elif drawdown < -10: score += 12
         elif drawdown < -5: score += 5
         elif drawdown > -2: score -= 10
 
-        # 3. מומנטום (RSI)
         if rsi < 30: score += 15
         elif rsi < 40: score += 8
         elif rsi > 70: score -= 15
 
-        # 4. מכפילים (PE)
         if pe_ratio < 18: score += 12
         elif pe_ratio > 26: score -= 15
 
-        # 5. תחזיות אנליסטים
         if analyst_upside > 15: score += 12
         elif analyst_upside < 3: score -= 8
 
-        # 6. ריבית אג"ח 10 שנים
         if current_tnx > 4.5: score -= 8
         elif current_tnx < 3.8: score += 8
 
-        # 7. סיכון גאופוליטי
         if geo_risk == "משבר גלובלי קיצוני": score += 15
         elif geo_risk == "משבר או מלחמה אזורית": score += 8
         elif geo_risk == "מתיחות בינונית": score -= 5
@@ -212,9 +202,22 @@ else:
         chosen_market = st.selectbox("בחר לאיזה מדד שייכת ההשקעה שלך:", ["S&P 500", "Nasdaq"])
         active_data = sp_data if chosen_market == "S&P 500" else nd_data
 
-        invested_amount = st.number_input("סכום ההשקעה הכולל ($):", min_value=0.0, value=10000.0, step=500.0)
-        entry_price = st.number_input("מחיר הכניסה הממוצע שלך ($):", min_value=0.0, value=float(active_data['price'] * 0.95), step=10.0)
-        monthly_budget = st.number_input("תקציב חודשי פנוי להשקעה נוספת ($):", min_value=0.0, value=1000.0, step=100.0)
+        # --- תיקון וניהול זיכרון (Session State) למניעת איפוס נתונים בהקלדה ---
+        market_suffix = "_sp" if chosen_market == "S&P 500" else "_nd"
+        inv_key = f"inv_amt{market_suffix}"
+        ent_key = f"ent_price{market_suffix}"
+        bud_key = f"bud_amt{market_suffix}"
+
+        if inv_key not in st.session_state:
+            st.session_state[inv_key] = 10000.0
+        if ent_key not in st.session_state:
+            st.session_state[ent_key] = float(active_data['price'] * 0.95)
+        if bud_key not in st.session_state:
+            st.session_state[bud_key] = 1000.0
+
+        invested_amount = st.number_input("סכום ההשקעה הכולל ($):", min_value=0.0, step=500.0, key=inv_key)
+        entry_price = st.number_input("מחיר הכניסה הממוצע שלך ($):", min_value=0.0, step=10.0, key=ent_key)
+        monthly_budget = st.number_input("תקציב חודשי פנוי להשקעה נוספת ($):", min_value=0.0, step=100.0, key=bud_key)
 
         if invested_amount > 0 and entry_price > 0:
             current_value = (invested_amount / entry_price) * active_data['price']
@@ -250,30 +253,4 @@ else:
 
     with tab4:
         st.markdown("### 🚨 סימולציית תרחישי קיצון (Stress Test)")
-        st.write("בדוק מראש איך התיק שלך יגיב במקרה של משבר פתאומי בשוק:")
-
-        total_portfolio = st.number_input("הערך הכולל של התיק שלך ($):", min_value=0.0, value=15000.0, step=1000.0)
-
-        if total_portfolio > 0:
-            drop_5 = total_portfolio * 0.95
-            drop_10 = total_portfolio * 0.90
-            drop_20 = total_portfolio * 0.80
-            crash_30 = total_portfolio * 0.70
-
-            st.markdown("---")
-            col_s1, col_s2 = st.columns(2)
-            col_s1.metric("תרחיש תיקון קל (-5%)", f"${drop_5:,.2f}", "-$750 יחסית לתיק")
-            col_s2.metric("תרחיש תיקון בינוני (-10%)", f"${drop_10:,.2f}", "-$1,500 יחסית לתיק")
-
-            col_s3, col_s4 = st.columns(2)
-            col_s3.metric("תרחיש משבר עמוק (-20%)", f"${drop_20:,.2f}", "-$3,000 יחסית לתיק")
-            col_s4.metric("תרחיש קריסת קיצון (-30%)", f"${crash_30:,.2f}", "-$4,500 יחסית לתיק")
-
-            st.info("💡 **טיפ פסיכולוגי:** ידיעת התרחישים מראש עוזרת לך לשמור על קור רוח בזמן ירידות, ולהשתמש בהן כהזדמנויות קנייה במסגרת ציון הכניסה!")
-
-    st.markdown("---")
-    st.caption(f"ℹ️ **סטטוס מקור מידע:** {sp_status}")
-
-    if st.button("🔄 רענן את כל הנתונים"):
-        st.cache_data.clear()
-        st.rerun()
+        st.write
