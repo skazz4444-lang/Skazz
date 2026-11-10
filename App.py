@@ -10,7 +10,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# עיצוב נקי, חד וברור למובייל (מונע לחלוטין בעיות כהה על כהה)
+# עיצוב נקי, חד וברור למובייל
 st.markdown("""
     <style>
     .stApp { background-color: #0b0f19; color: #f3f4f6; }
@@ -20,8 +20,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🎯 יועץ כניסה ויציאה חכם למדדים")
-st.caption(f"עדכון חי: {datetime.now().strftime('%H:%M:%S')} | ניהול תיק מתקדם וספקי גיבוי")
+st.title("🎯 יועץ כניסה ויציאה חכם לתיק ולמדדים")
+st.caption(f"עדכון חי: {datetime.now().strftime('%H:%M:%S')} | מעקב מותאם לקרנות סל (SPY / QQQ)")
 
 # הגדרת מאקרו גלובלית (סיכון פוליטי / ביטחוני)
 st.markdown("### 🌐 הגדרות מאקרו וגאופוליטיקה")
@@ -31,7 +31,7 @@ geo_risk = st.select_slider(
     value="רגוע ושגרתי"
 )
 
-# --- פונקציית שליפת נתונים חכמה הכוללת ספקי גיבוי (Yahoo + Stooq) ---
+# --- פונקציית שליפת נתונים מעודכנת לקרנות סל (SPY / QQQ) ---
 @st.cache_data(ttl=10)
 def fetch_market_with_fallback(yahoo_ticker, stooq_symbol):
     try:
@@ -61,9 +61,10 @@ def fetch_market_with_fallback(yahoo_ticker, stooq_symbol):
 
     return pd.DataFrame(), {}, "שגיאה: כל הספקים נכשלו"
 
-with st.spinner("🔄 שולף נתונים חיים מספקים ראשיים ומגביים..."):
-    sp_hist, sp_info, sp_status = fetch_market_with_fallback("^GSPC", "^spx")
-    nd_hist, nd_info, nd_status_nd = fetch_market_with_fallback("^IXIC", "^ndq")
+with st.spinner("🔄 שולף נתונים חיים עבור SPY ו-QQQ..."):
+    # מעבר ממעקב אחרי מדדים גולמיים למעקב אחרי קרנות סל אמיתיות (SPY ו-QQQ)
+    sp_hist, sp_info, sp_status = fetch_market_with_fallback("SPY", "spy")
+    nd_hist, nd_info, nd_status_nd = fetch_market_with_fallback("QQQ", "qqq")
     vix_hist, _, _ = fetch_market_with_fallback("^VIX", "^vix")
     tnx_hist, _, _ = fetch_market_with_fallback("^TNX", "^tnx")
 
@@ -73,7 +74,7 @@ else:
     current_vix = vix_hist['Close'].iloc[-1] if not vix_hist.empty else 20.0
     current_tnx = tnx_hist['Close'].iloc[-1] if not tnx_hist.empty else 4.2
 
-    # פונקציית ניתוח מקיפה לכל מדד
+    # פונקציית ניתוח מקיפה
     def analyze_market(hist, info):
         current_price = hist['Close'].iloc[-1]
         prev_close = hist['Close'].iloc[-2]
@@ -145,112 +146,4 @@ else:
         return {
             "price": current_price, "change": daily_change, "drawdown": drawdown,
             "rsi": rsi, "pe": pe_ratio, "upside": analyst_upside, "valuation": valuation,
-            "score": score, "sma50": sma_50, "sma200": sma_200, "trend": trend,
-            "target": target_mean, "is_overheated": is_overheated
-        }
-
-    sp_data = analyze_market(sp_hist, sp_info)
-    nd_data = analyze_market(nd_hist, nd_info)
-
-    # יצירת לשוניות נפרדות וברורות
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 S&P 500", "💻 Nasdaq", "💼 ניהול תיק ו-DCA", "🚨 סימולציית קיצון"])
-
-    def render_market_tab(name, data):
-        st.markdown(f"### מדד {name}")
-        score = data["score"]
-        st.progress(score / 100)
-
-        if data["is_overheated"]:
-            st.error("🚨 **התרעת אופוריה / בועה (איתות יציאה/מימוש חלקי):** השוק נמצא בקניית-יתר קיצונית, פחד נמוך ותמחור מנופח. זהו זמן מעולה לשקול נעילת רווחים!")
-
-        if score >= 75:
-            st.success(f"### 🟢 ציון כניסה: {score}/100 – אזור קנייה חזק מאוד! (הזדמנות)")
-        elif score >= 55:
-            st.info(f"### 🔵 ציון כניסה: {score}/100 – כניסה סבירה / ניטרלי (מומלץ DCA מדורג)")
-        elif score >= 35:
-            st.warning(f"### 🟠 ציון כניסה: {score}/100 – זהירות, אין מספיק תמריצי קנייה.")
-        else:
-            st.error(f"### 🔴 ציון כניסה: {score}/100 – שוק יקר או בסיכון. עדיף להמתין.")
-
-        st.metric("מחיר המדד כרגע", f"{data['price']:,.2f}", f"{data['change']:+.2f}%")
-        st.metric("הערכת שווי", data['valuation'])
-        st.write(f"**מגמה טכנית:** {data['trend']}")
-
-        st.markdown("---")
-        col1, col2 = st.columns(2)
-        col1.metric("מדד הפחד (VIX)", f"{current_vix:.2f}")
-        col2.metric("מומנטום (RSI)", f"{data['rsi']:.1f}")
-
-        col3, col4 = st.columns(2)
-        col3.metric("מרחק מהשיא", f"{data['drawdown']:.2f}%")
-        col4.metric("מכפיל רווח (PE)", f"{data['pe']:.1f}")
-
-        col5, col6 = st.columns(2)
-        col5.metric("פוטנציאל אנליסטים", f"{data['upside']:+.1f}%")
-        col6.metric("תשואת אג\"ח 10 שנים", f"{current_tnx}%")
-
-    with tab1:
-        render_market_tab("S&P 500", sp_data)
-
-    with tab2:
-        render_market_tab("Nasdaq Composite", nd_data)
-
-    with tab3:
-        st.markdown("### 💼 ניהול תיק אישי, אסטרטגיית DCA וסטופ-לוס")
-        st.write("הזן את נתוני ההשקעה שלך כדי לקבל איתותי כניסה ויציאה מותאמים אישית:")
-
-        chosen_market = st.selectbox("בחר לאיזה מדד שייכת ההשקעה שלך:", ["S&P 500", "Nasdaq"])
-        active_data = sp_data if chosen_market == "S&P 500" else nd_data
-
-        # --- תיקון וניהול זיכרון (Session State) למניעת איפוס נתונים בהקלדה ---
-        market_suffix = "_sp" if chosen_market == "S&P 500" else "_nd"
-        inv_key = f"inv_amt{market_suffix}"
-        ent_key = f"ent_price{market_suffix}"
-        bud_key = f"bud_amt{market_suffix}"
-
-        if inv_key not in st.session_state:
-            st.session_state[inv_key] = 10000.0
-        if ent_key not in st.session_state:
-            st.session_state[ent_key] = float(active_data['price'] * 0.95)
-        if bud_key not in st.session_state:
-            st.session_state[bud_key] = 1000.0
-
-        invested_amount = st.number_input("סכום ההשקעה הכולל ($):", min_value=0.0, step=500.0, key=inv_key)
-        entry_price = st.number_input("מחיר הכניסה הממוצע שלך ($):", min_value=0.0, step=10.0, key=ent_key)
-        monthly_budget = st.number_input("תקציב חודשי פנוי להשקעה נוספת ($):", min_value=0.0, step=100.0, key=bud_key)
-
-        if invested_amount > 0 and entry_price > 0:
-            current_value = (invested_amount / entry_price) * active_data['price']
-            profit_loss_dollar = current_value - invested_amount
-            profit_loss_pct = ((active_data['price'] - entry_price) / entry_price) * 100
-
-            recommended_stop_loss = entry_price * 0.92  # 8% מתחת למחיר הכניסה
-
-            st.markdown("---")
-            st.subheader("📊 סיכום מצב התיק והגנות")
-            col_m1, col_m2 = st.columns(2)
-            col_m1.metric("שווי תיק נוכחי", f"${current_value:,.2f}", f"{profit_loss_pct:+.2f}%")
-            col_m2.metric("רווח / הפסד ($)", f"${profit_loss_dollar:+,.2f}")
-
-            st.write(f"🛡️ **סטופ-לוס דינמי מומלץ:** ${recommended_stop_loss:,.2f} (כ-8% מתחת למחיר הכניסה שלך)")
-
-            st.markdown("### 💡 המלצת פעולה אקטיבית (כניסה / יציאה):")
-            score = active_data['score']
-
-            if active_data['is_overheated']:
-                st.error("🚨 **המלצת יציאה / מימוש רווחים:** השוק באופוריה מסוכנת. אם אתה מרוויח יפה (מעל 15%), כדאי לממש חלק מהרווחים (למשל 25%-30%) ולשבת על מזומן.")
-            elif score >= 70:
-                allocation_pct = 50 if score >= 85 else 30
-                suggested_buy = monthly_budget * (allocation_pct / 100)
-                st.success(f"🟢 **המלצת כניסה (DCA חכם):** השוק באזור קנייה טוב! מומלץ להשקיע כעת **{allocation_pct}%** מתקציבך הפנוי (כ-${suggested_buy:,.2f}).")
-            elif score >= 50:
-                st.info("🔵 **המלצה: פיזור הדרגתי (DCA).** השוק ניטרלי. הפקד במנות קטנות ושמור את רוב המזומן לירידות.")
-            else:
-                if profit_loss_pct > 12:
-                    st.warning("🟠 **המלצה: שקול מימוש חלקי.** השוק יקר ומתוח, והרווח שלך טוב. כדאי לנעול חלק מהרווחים.")
-                else:
-                    st.error("🔴 **המלצה: עצירת רכישות והמתנה!** השוק יקר או תנודתי מדי (ציון נמוך). אל תכניס כסף חדש, תן לכסף הקיים לצמוח והמתן לתיקון.")
-
-    with tab4:
-        st.markdown("### 🚨 סימולציית תרחישי קיצון (Stress Test)")
-        st.write
+            "score": score, "sma50": sma_50, "sma200": sma
