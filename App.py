@@ -184,23 +184,4 @@ with tab3:
     st.markdown("### 💼 ניהול תיק אישי, אסטרטגיית DCA וסטופ-לוס")
     st.write("הזן את נתוני ההשקעה שלך כדי לקבל איתותי כניסה ויציאה מותאמים אישית:")
 
-    chosen_market = st.selectbox("בחר לאיזה נכס שייכת ההשקעה שלך:", ["SPY", "QQQ"])
-    active_data = sp_data if chosen_market == "SPY" else nd_data
-    active_score = sp_score if chosen_market == "SPY" else nd_score
-    active_over = sp_overheated if chosen_market == "SPY" else nd_overheated
-
-    market_suffix = "_spy" if chosen_market == "SPY" else "_qqq"
-    inv_key = f"inv_amt{market_suffix}"
-    ent_key = f"ent_price{market_suffix}"
-    bud_key = f"bud_amt{market_suffix}"
-
-    if inv_key not in st.session_state:
-        st.session_state[inv_key] = 5000.0
-    if ent_key not in st.session_state:
-        st.session_state[ent_key] = 647.71 if chosen_market == "QQQ" else 550.0
-    if bud_key not in st.session_state:
-        st.session_state[bud_key] = 1000.0
-
-    invested_amount = st.number_input("סכום ההשקעה הכולל ($):", min_value=0.0, step=100.0, key=inv_key)
-    entry_price = st.number_input("מחיר הכניסה הממוצע שלך ($):", min_value=0.0, step=0.01, format="%.2f", key=ent_key)
-    monthly_budget = st.number_input("תקציב חודשי פנוי להש
+    chosen_market = st.selectbox("בחר לאיזה נכס שיי
