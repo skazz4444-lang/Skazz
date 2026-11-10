@@ -552,7 +552,7 @@ elif page == "קרנות ממונפות":
 
         price_chart(df_lev, f"ביצועי {ticker_symbol} בדולרים ($)")
     else:
-        st.warning("אין מספיק נתונים להצגת הקרן הממונפת.")
+        st.warning("אין מספיק נתונים להצגת הקרן הממונפות.")
 
 
 # =====================================================
@@ -711,4 +711,3 @@ elif page == "Backtesting":
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("אין מספיק נתונים היסטוריים לביצוע הבדיקה.")
-ט
