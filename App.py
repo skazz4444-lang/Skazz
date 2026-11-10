@@ -359,7 +359,7 @@ def calculate_positions(tx):
 
 
 # =====================================================
-# SIDEBAR NAVIGATION
+# SIDEBAR NAVIGATION (INCLUDES THE 2 REQUIRED BUTTONS)
 # =====================================================
 
 st.sidebar.title("📊 MARKET RADAR")
@@ -369,13 +369,13 @@ page = st.sidebar.radio(
     "ניווט באפליקציה",
     [
         "סקירת שוק חכמה",
-        "המלצות Top 5 יומיות",
+        "המלצות Top 5 יומיות",         # <-- כפתור 1 מבוקש
+        "תיק השקעות והמלצות",          # <-- כפתור 2 מבוקש (ניהול תיקים עם סכומי כניסה והמלצות)
         "קרנות ממונפות",
         "ניתוח מדדים",
         "תמחור ומחירים",
         "מאקרו וכלכלה",
         "חדשות שוק",
-        "תיק השקעות והמלצות",
         "ניהול סיכונים",
         "Backtesting"
     ]
@@ -458,7 +458,7 @@ if page == "סקירת שוק חכמה":
 elif page == "המלצות Top 5 יומיות":
 
     st.title("⭐ המלצות Top 5 יומיות מתחלפות להשקעה")
-    st.markdown("רשימת 5 מניות, מדדים וקרנות סל מובילים שנסרקים מדי יום ומדורגים על סמך שקלול חכם של מומנטום RSI, ממוצעים נעים והנחות מחיר זמניות.")
+    st.markdown("רשימת 5 מניות, מדדים וקרנות סל מובילים שנסרקים ומדורגים על סמך שקלול חכם של מומנטום RSI, ממוצעים נעים והנחות מחיר זמניות בשוק.")
 
     top_candidates = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AMD", "TSLA"]
     
@@ -472,7 +472,6 @@ elif page == "המלצות Top 5 יומיות":
             ma50 = tech["ma50"]
             
             if ma50 and price > ma50 * 0.90:
-                # ציון אטרקטיביות משוקלל מבוסס מומנטום ומחיר זול יחסי
                 attractiveness = (100 - rsi) if rsi < 60 else rsi * 0.4
                 analyzed_list.append({
                     "סימול": ticker,
@@ -486,190 +485,19 @@ elif page == "המלצות Top 5 יומיות":
     if analyzed_list:
         df_top = pd.DataFrame(analyzed_list).sort_values(by="ציון אטרקטיביות", ascending=False).head(5)
         st.dataframe(df_top.drop(columns=["ציון אטרקטיביות"]), use_container_width=True)
-        st.info("💡 רשימה זו מתעדכנת ומתחלפת באופן דינמי בכל יום בהתאם לנתוני המסחר והשקלול המשולב.")
+        st.info("💡 רשימה זו מתעדכנת ומתחלפת באופן דינמי בהתאם לנתוני המסחר והשקלול המשולב.")
     else:
         st.warning("לא נמצאו מספיק נתונים להצגת הטופ 5 כרגע.")
 
 
 # =====================================================
-# 3. LEVERAGED FUNDS
-# =====================================================
-
-elif page == "קרנות ממונפות":
-
-    st.title("⚡ ניתוח והמלצות על קרנות ממונפות")
-    st.warning("⚠️ אזהרה: קרנות ממונפות (2x או 3x) מתאימות למשקיעים מתקדמים ומגדילות תנודתיות ושחיקה.")
-
-    lev_tickers = {
-        "TQQQ (3x Nasdaq - טכנולוגיה ממונפת)": "TQQQ",
-        "UPRO (3x S&P 500 - מדד רחב ממונף)": "UPRO",
-        "QLD (2x Nasdaq - ממונף מתון)": "QLD",
-        "SSO (2x S&P 500 - ממונף מתון)": "SSO"
-    }
-
-    selected_lev = st.selectbox("בחר קרנות ממונפות לבדיקה", list(lev_tickers.keys()))
-    ticker_symbol = lev_tickers[selected_lev]
-
-    df_lev = get_history(ticker_symbol, "1y")
-    tech_lev = technical(df_lev)
-
-    if not df_lev.empty and tech_lev:
-        col1, col2, col3 = st.columns(3)
-        col1.metric("מחיר נוכחי", f"${tech_lev['price']:,.2f}")
-        col2.metric("תנודתיות שנתית (סיכון)", f"{tech_lev['volatility']:.1f}%")
-        col3.metric("ירידה מהשיא", f"{tech_lev['drawdown']:.1f}%")
-
-        st.divider()
-        st.subheader("🤖 ניתוח מצב ומומלצות לקרן ממונפות זו:")
-        
-        if tech_lev["price"] > tech_lev.get("ma200", 0) and tech_lev.get("rsi", 50) < 65:
-            st.success(f"**המלצה: כניסה זהירה אפשרית.** הנכס מעל ממוצע 200 (מגמת עליה חיובית ראשית).")
-        elif tech_lev.get("rsi", 50) > 70:
-            st.warning(f"**המלצה: לא להיכנס עכשיו.** RSI גבוה מאוד (קנוי יתר).")
-        else:
-            st.error(f"**המלצה: סיכון גבוה כרגע.** המגמה מעורבת או מתחת לממוצעים.")
-
-        price_chart(df_lev, f"ביצועי {ticker_symbol} בדולרים ($)")
-    else:
-        st.warning("אין מספיק נתונים להצגת הקרן הממונפות.")
-
-
-# =====================================================
-# 4. INDEX ANALYSIS
-# =====================================================
-
-elif page == "ניתוח מדדים":
-
-    st.title("📈 ניתוח מדדים מובילים")
-
-    choices = {
-        "S&P 500 (SPY)": "SPY",
-        "Nasdaq 100 (QQQ)": "QQQ"
-    }
-
-    selected = st.selectbox("בחר מדד", list(choices))
-    df = get_history(choices[selected], "5y")
-
-    if not df.empty:
-        price_chart(df, selected)
-        t = technical(df)
-
-        if t:
-            cols = st.columns(3)
-            cols[0].metric("RSI (מומנטום)", money(t["rsi"], ""))
-            cols[1].metric("תנודתיות שנתית", f"{t['volatility']:.2f}%")
-            cols[2].metric("ירידה מהשיא", f"{t['drawdown']:.2f}%")
-
-            cols2 = st.columns(3)
-            cols2[0].metric("שינוי יומי", f"{t['change']:+.2f}%")
-            cols2[1].metric("תשואה חודשית", f"{t['month']:+.2f}%" if t["month"] is not None else "לא זמין")
-            cols2[2].metric("תשואה רבעונית", f"{t['quarter']:+.2f}%" if t["quarter"] is not None else "לא זמין")
-    else:
-        st.error("לא התקבלו נתונים עבור המדד הנבחר.")
-
-
-# =====================================================
-# 5. VALUATION
-# =====================================================
-
-elif page == "תמחור ומחירים":
-
-    st.title("💰 תמחור נכסים מרכזיים")
-
-    ticker = st.selectbox("בחר קרן סל או מניה מובילה", ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL"])
-    info = get_info(ticker)
-
-    fields = {
-        "מכפיל רווח נוכחי (Trailing P/E)": "trailingPE",
-        "מכפיל רווח עתידי (Forward P/E)": "forwardPE",
-        "יחס מחיר להון (Price to Book)": "priceToBook",
-        "שולי רווח (Profit Margin)": "profitMargins",
-        "תחזית מחיר ממוצעת מאנליסטים": "targetMeanPrice",
-        "תחזית מחיר גבוהה מאנליסטים": "targetHighPrice"
-    }
-
-    rows = []
-    for label, key in fields.items():
-        value = info.get(key)
-        if value is None:
-            value = "לא זמין"
-        elif isinstance(value, (float, int, np.number)):
-            value = round(float(value), 2)
-            if "מחיר" in label:
-                value = f"${value}"
-        rows.append({"נתון פיננסי": label, "ערך": value})
-
-    st.dataframe(pd.DataFrame(rows), use_container_width=True)
-    st.info("💡 כל המחירים והתחזיות מוצגים בדולרים ($).")
-
-
-# =====================================================
-# 6. MACRO
-# =====================================================
-
-elif page == "מאקרו וכלכלה":
-
-    st.title("🏦 נתוני מאקרו כלכליים")
-
-    series = {
-        "ריבית הפד האמריקאית": "FEDFUNDS",
-        "תשואת אגח ארהב 10 שנים": "DGS10",
-        "אינפלציה בארהב (CPI)": "CPIAUCSL",
-        "שיעור האבטלה": "UNRATE"
-    }
-
-    selected = st.selectbox("בחר נתון מאקרו", list(series))
-    df = get_fred(series[selected])
-
-    if not df.empty:
-        latest = df.iloc[-1]
-        st.metric(selected, f"{latest['value']:.3f}", str(latest["date"].date()))
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df["date"], y=df["value"], mode="lines", name=selected, line=dict(color="#2563eb")))
-        fig.update_layout(template="plotly_white", height=400, paper_bgcolor="#ffffff", plot_bgcolor="#ffffff")
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.warning("הנתון אינו זמין כרגע.")
-
-
-# =====================================================
-# 7. NEWS
-# =====================================================
-
-elif page == "חדשות":
-
-    st.title("📰 חדשות שוק ההון")
-
-    topics = {
-        "כלכלה אמריקאית ושווקים": "US stock market economy",
-        "ריבית ואינפלציה": "Federal Reserve inflation interest rates",
-        "טכנולוגיה ובינה מלאכותית": "technology AI stocks"
-    }
-
-    topic = st.selectbox("בחר נושא חדשותי", list(topics))
-    articles = get_news(topics[topic])
-
-    if articles:
-        for article in articles:
-            with st.container(border=True):
-                st.markdown(f"**{article.get('title', 'ללא כותרת')}**")
-                st.caption(str(article.get("domain", "")) + " | " + str(article.get("seendate", "")))
-                url = article.get("url")
-                if url:
-                    st.link_button("לקריאת הכתבה המלאה", url)
-    else:
-        st.warning("לא התקבלו כתבות כרגע.")
-
-
-# =====================================================
-# 8. PORTFOLIO & SMART RECOMMENDATIONS
+# 3. PORTFOLIO & SMART RECOMMENDATIONS (PORTFOLIO MANAGEMENT)
 # =====================================================
 
 elif page == "תיק השקעות והמלצות":
 
     st.title("💼 ניהול תיק השקעות חכם בדולרים ($)")
-    st.markdown("הזן את עסקאות הרכישה שלך. הנתונים נשמרים במסד הנתונים ומתעדכנים אוטומטית מול מחירי השוק החיים עם המלצות ניהול אישיות.")
+    st.markdown("הזן את עסקאות הרכישה שלך עם סכום וכמות. הנתונים נשמרים במסד הנתונים ומתעדכנים אוטומטית מול מחירי השוק החיים, כולל המלצות ניהול אישיות.")
 
     with st.form("add_transaction"):
         col1, col2 = st.columns(2)
@@ -737,6 +565,177 @@ elif page == "תיק השקעות והמלצות":
 
     else:
         st.info("עדיין לא הוזנו עסקאות לתיק. התחל להזין למעלה כדי לראות את הפוזיציות שלך ואת ההמלצות החכמות.")
+
+
+# =====================================================
+# 4. LEVERAGED FUNDS
+# =====================================================
+
+elif page == "קרנות ממונפות":
+
+    st.title("⚡ ניתוח והמלצות על קרנות ממונפות")
+    st.warning("⚠️ אזהרה: קרנות ממונפות (2x או 3x) מתאימות למשקיעים מתקדמים ומגדילות תנודתיות ושחיקה.")
+
+    lev_tickers = {
+        "TQQQ (3x Nasdaq - טכנולוגיה ממונפת)": "TQQQ",
+        "UPRO (3x S&P 500 - מדד רחב ממונף)": "UPRO",
+        "QLD (2x Nasdaq - ממונף מתון)": "QLD",
+        "SSO (2x S&P 500 - ממונף מתון)": "SSO"
+    }
+
+    selected_lev = st.selectbox("בחר קרנות ממונפות לבדיקה", list(lev_tickers.keys()))
+    ticker_symbol = lev_tickers[selected_lev]
+
+    df_lev = get_history(ticker_symbol, "1y")
+    tech_lev = technical(df_lev)
+
+    if not df_lev.empty and tech_lev:
+        col1, col2, col3 = st.columns(3)
+        col1.metric("מחיר נוכחי", f"${tech_lev['price']:,.2f}")
+        col2.metric("תנודתיות שנתית (סיכון)", f"{tech_lev['volatility']:.1f}%")
+        col3.metric("ירידה מהשיא", f"{tech_lev['drawdown']:.1f}%")
+
+        st.divider()
+        st.subheader("🤖 ניתוח מצב ומומלצות לקרן ממונפות זו:")
+        
+        if tech_lev["price"] > tech_lev.get("ma200", 0) and tech_lev.get("rsi", 50) < 65:
+            st.success(f"**המלצה: כניסה זהירה אפשרית.** הנכס מעל ממוצע 200 (מגמת עליה חיובית ראשית).")
+        elif tech_lev.get("rsi", 50) > 70:
+            st.warning(f"**המלצה: לא להיכנס עכשיו.** RSI גבוה מאוד (קנוי יתר).")
+        else:
+            st.error(f"**המלצה: סיכון גבוה כרגע.** המגמה מעורבת או מתחת לממוצעים.")
+
+        price_chart(df_lev, f"ביצועי {ticker_symbol} בדולרים ($)")
+    else:
+        st.warning("אין מספיק נתונים להצגת הקרן הממונפות.")
+
+
+# =====================================================
+# 5. INDEX ANALYSIS
+# =====================================================
+
+elif page == "ניתוח מדדים":
+
+    st.title("📈 ניתוח מדדים מובילים")
+
+    choices = {
+        "S&P 500 (SPY)": "SPY",
+        "Nasdaq 100 (QQQ)": "QQQ"
+    }
+
+    selected = st.selectbox("בחר מדד", list(choices))
+    df = get_history(choices[selected], "5y")
+
+    if not df.empty:
+        price_chart(df, selected)
+        t = technical(df)
+
+        if t:
+            cols = st.columns(3)
+            cols[0].metric("RSI (מומנטום)", money(t["rsi"], ""))
+            cols[1].metric("תנודתיות שנתית", f"{t['volatility']:.2f}%")
+            cols[2].metric("ירידה מהשיא", f"{t['drawdown']:.2f}%")
+
+            cols2 = st.columns(3)
+            cols2[0].metric("שינוי יומי", f"{t['change']:+.2f}%")
+            cols2[1].metric("תשואה חודשית", f"{t['month']:+.2f}%" if t["month"] is not None else "לא זמין")
+            cols2[2].metric("תשואה רבעונית", f"{t['quarter']:+.2f}%" if t["quarter"] is not None else "לא זמין")
+    else:
+        st.error("לא התקבלו נתונים עבור המדד הנבחר.")
+
+
+# =====================================================
+# 6. VALUATION
+# =====================================================
+
+elif page == "תמחור ומחירים":
+
+    st.title("💰 תמחור נכסים מרכזיים")
+
+    ticker = st.selectbox("בחר קרן סל או מניה מובילה", ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL"])
+    info = get_info(ticker)
+
+    fields = {
+        "מכפיל רווח נוכחי (Trailing P/E)": "trailingPE",
+        "מכפיל רווח עתידי (Forward P/E)": "forwardPE",
+        "יחס מחיר להון (Price to Book)": "priceToBook",
+        "שולי רווח (Profit Margin)": "profitMargins",
+        "תחזית מחיר ממוצעת מאנליסטים": "targetMeanPrice",
+        "תחזית מחיר גבוהה מאנליסטים": "targetHighPrice"
+    }
+
+    rows = []
+    for label, key in fields.items():
+        value = info.get(key)
+        if value is None:
+            value = "לא זמין"
+        elif isinstance(value, (float, int, np.number)):
+            value = round(float(value), 2)
+            if "מחיר" in label:
+                value = f"${value}"
+        rows.append({"נתון פיננסי": label, "ערך": value})
+
+    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+    st.info("💡 כל המחירים והתחזיות מוצגים בדולרים ($).")
+
+
+# =====================================================
+# 7. MACRO
+# =====================================================
+
+elif page == "מאקרו וכלכלה":
+
+    st.title("🏦 נתוני מאקרו כלכליים")
+
+    series = {
+        "ריבית הפד האמריקאית": "FEDFUNDS",
+        "תשואת אגח ארהב 10 שנים": "DGS10",
+        "אינפלציה בארהב (CPI)": "CPIAUCSL",
+        "שיעור האבטלה": "UNRATE"
+    }
+
+    selected = st.selectbox("בחר נתון מאקרו", list(series))
+    df = get_fred(series[selected])
+
+    if not df.empty:
+        latest = df.iloc[-1]
+        st.metric(selected, f"{latest['value']:.3f}", str(latest["date"].date()))
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df["date"], y=df["value"], mode="lines", name=selected, line=dict(color="#2563eb")))
+        fig.update_layout(template="plotly_white", height=400, paper_bgcolor="#ffffff", plot_bgcolor="#ffffff")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("הנתון אינו זמין כרגע.")
+
+
+# =====================================================
+# 8. NEWS
+# =====================================================
+
+elif page == "חדשות":
+
+    st.title("📰 חדשות שוק ההון")
+
+    topics = {
+        "כלכלה אמריקאית ושווקים": "US stock market economy",
+        "ריבית ואינפלציה": "Federal Reserve inflation interest rates",
+        "טכנולוגיה ובינה מלאכותית": "technology AI stocks"
+    }
+
+    topic = st.selectbox("בחר נושא חדשותי", list(topics))
+    articles = get_news(topics[topic])
+
+    if articles:
+        for article in articles:
+            with st.container(border=True):
+                st.markdown(f"**{article.get('title', 'ללא כותרת')}**")
+                st.caption(str(article.get("domain", "")) + " | " + str(article.get("seendate", "")))
+                url = article.get("url")
+                if url:
+                    st.link_button("לקריאת הכתבה המלאה", url)
+    else:
+        st.warning("לא התקבלו כתבות כרגע.")
 
 
 # =====================================================
