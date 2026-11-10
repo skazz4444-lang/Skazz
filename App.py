@@ -20,7 +20,7 @@ st.set_page_config(
 
 DB = "market_radar.db"
 
-# ---------------- CLEAN & MODERN DESIGN (LIGHT THEME) ----------------
+# ---------------- CLEAN DESIGN (LIGHT THEME) ----------------
 
 st.markdown("""
 <style>
@@ -73,11 +73,9 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tx_date TEXT NOT NULL,
             ticker TEXT NOT NULL,
-            action TEXT NOT NULL,
+            total_invested REAL NOT NULL,
+            buy_price REAL NOT NULL,
             quantity REAL NOT NULL,
-            price REAL NOT NULL,
-            fee REAL DEFAULT 0,
-            currency TEXT DEFAULT 'USD',
             notes TEXT DEFAULT ''
         )
         """)
@@ -232,40 +230,40 @@ def calculate_market_score(sp_df, vix_value):
     factors = {}
     
     if tech["ma200"] is not None:
-        factors["מגמה ארוכה"] = 100 if tech["price"] > tech["ma200"] else 25
+        factors["מגמה ארוכה (MA200)"] = 100 if tech["price"] > tech["ma200"] else 25
 
     if tech["ma50"] is not None:
-        factors["מגמה בינונית"] = 100 if tech["price"] > tech["ma50"] else 35
+        factors["מגמה בינונית (MA50)"] = 100 if tech["price"] > tech["ma50"] else 35
 
     if tech["rsi"] is not None:
         rsi = tech["rsi"]
         if 40 <= rsi <= 60:
-            factors["מומנטום בריא"] = 85
+            factors["מומנטום בריא (RSI)"] = 85
         elif rsi < 40:
             factors["מחיר זול / הזדמנות איסוף"] = 100
         elif rsi > 70:
             factors["שוק יקר / קנוי יתר"] = 30
         else:
-            factors["מומנטום"] = 65
+            factors["מומנטום (RSI)"] = 65
 
     if vix_value is not None:
         if vix_value < 16:
-            factors["רמת פחד בשוק"] = 90
+            factors["מדד הפחד VIX (רגיעה)"] = 90
         elif vix_value < 22:
-            factors["רמת פחד בשוק"] = 70
+            factors["מדד הפחד VIX (סביר)"] = 70
         elif vix_value < 30:
-            factors["רמת פחד בשוק"] = 45
+            factors["מדד הפחד VIX (חשש)"] = 45
         else:
-            factors["רמת פחד בשוק"] = 20
+            factors["מדד הפחד VIX (פחד חריף)"] = 20
 
     dd = tech.get("drawdown", 0)
     if dd is not None:
         if dd >= -2:
-            factors["קרבה לשיא"] = 70
+            factors["מרחק מהשיא"] = 70
         elif -10 <= dd < -2:
-            factors["תיקון בריא (זול יותר מהשיא)"] = 95
+            factors["תיקון בריא מהשיא"] = 95
         elif -20 <= dd < -10:
-            factors["ירידה משמעותית (הנחה טובה)"] = 100
+            factors["הנחה משמעותית בשוק"] = 100
         else:
             factors["ירידה חדה מאוד (סיכון גבוה)"] = 40
 
@@ -275,102 +273,97 @@ def calculate_market_score(sp_df, vix_value):
     score = round(float(np.mean(list(factors.values()))), 1)
 
     if score >= 75:
-        verdict = "🟢 מצב שוק אטרקטיבי: התנאים מצוינים לכניסה או להשקעה נוספת."
+        verdict = "🟢 מצב שוק אטרקטיבי: התנאים מצוינים לכניסה או להגדלת השקעות."
     elif score >= 50:
-        verdict = "🟡 מצב שוק ניטרלי: כדאי להשקיע בסכומים מדודים או להמתין להזדמנות טובה יותר."
+        verdict = "🟡 מצב שוק ניטרלי: מומלץ לנקוט בגישה מדורגת (DCA) ולא לקפוץ בבת אחת."
     else:
-        verdict = "🔴 שוק תנודתי או יקר: מומלץ לנקוט משנה זהירות, לא לקפוץ בראש ולהשקיע בהדרגה."
+        verdict = "🔴 שוק תנודתי או יקר: מומלץ להמתין להתייצבות או לממש חלק מהרווחים."
 
     return score, factors, verdict
 
 
-# ---------------- PORTFOLIO LOGIC & LIVE UPDATES ----------------
+# ---------------- PORTFOLIO DB & RECOMMENDATION LOGIC ----------------
 
-def add_transaction(tx_date, ticker, action, quantity, price, fee, currency, notes):
+def add_transaction(tx_date, ticker, total_invested, buy_price, notes=""):
+    quantity = total_invested / buy_price if buy_price > 0 else 0
     with connect_db() as con:
         con.execute("""
-        INSERT INTO transactions (tx_date,ticker,action,quantity,price,fee,currency,notes)
-        VALUES (?,?,?,?,?,?,?,?)
-        """, (str(tx_date), ticker.upper(), action, quantity, price, fee, currency, notes))
+        INSERT INTO transactions (tx_date, ticker, total_invested, buy_price, quantity, notes)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """, (str(tx_date), ticker.upper(), total_invested, buy_price, quantity, notes))
 
 def load_transactions():
     with connect_db() as con:
-        return pd.read_sql_query("SELECT * FROM transactions ORDER BY tx_date, id", con)
+        return pd.read_sql_query("SELECT * FROM transactions ORDER BY tx_date DESC, id DESC", con)
 
 def calculate_positions(tx):
     if tx.empty:
         return pd.DataFrame()
 
+    vix_df = get_history("^VIX", "5d")
+    vix_close = close_series(vix_df)
+    vix_val = float(vix_close.iloc[-1]) if not vix_close.empty else 20.0
+
     results = []
-    for ticker, group in tx.groupby("ticker"):
-        units = 0.0
-        cost = 0.0
-        fees = 0.0
-        realized = 0.0
+    for id_val, row in tx.iterrows():
+        tx_id = row["id"]
+        ticker = row["ticker"]
+        tx_date = row["tx_date"]
+        cost = float(row["total_invested"])
+        buy_price = float(row["buy_price"])
+        units = float(row["quantity"])
 
-        for _, row in group.iterrows():
-            qty = float(row["quantity"])
-            price = float(row["price"])
-            fee = float(row["fee"])
+        df = get_history(ticker, "6m")
+        close = close_series(df)
+        current = float(close.iloc[-1]) if not close.empty else np.nan
+        tech = technical(df)
 
-            if row["action"] == "קנייה":
-                units += qty
-                cost += qty * price + fee
-                fees += fee
-            elif row["action"] == "מכירה":
-                if qty > units:
-                    continue
-                avg_cost = cost / units if units else 0
-                realized += qty * price - qty * avg_cost - fee
-                cost -= qty * avg_cost
-                units -= qty
-                fees += fee
+        if np.isfinite(current):
+            value = current * units
+            pnl = value - cost
+            pnl_pct = (pnl / cost) * 100
+        else:
+            value, pnl, pnl_pct = np.nan, np.nan, np.nan
 
-        if units > 0:
-            df = get_history(ticker, "5d")
-            close = close_series(df)
-            current = float(close.iloc[-1]) if not close.empty else np.nan
+        rsi = tech.get("rsi", 50)
+        
+        # המלצה משוקללת ומבוססת פרמטרים רחבים
+        if pnl_pct > 18 or (rsi > 72 and pnl_pct > 10):
+            suggestion = "🔴 למכור / לממש רווחים (הנכס הגיע לתשואה גבוהה / קנוי יתר)"
+        elif pnl_pct < -8 and (rsi < 45 or vix_val > 22):
+            suggestion = "➕ להוסיף כסף (מחיר הקנייה זול משמעותית כעת והשוק בהנחה)"
+        else:
+            suggestion = "🛡️ להשאיר את הכסף (המגמה יציבה, אין צורך בשינוי כרגע)"
 
-            value = current * units if np.isfinite(current) else np.nan
-            pnl = value - cost if np.isfinite(value) else np.nan
-            pnl_pct = (pnl / cost * 100) if cost > 0 and np.isfinite(pnl) else 0
-
-            # שקלול חכם ומדויק להמלצות בניהול תיקים
-            if pnl_pct > 15:
-                suggestion = "💡 שקול לממש חלק רווחים או להשאיר לטווח ארוך"
-            elif pnl_pct < -10:
-                suggestion = "➕ מחיר כרגע זול מעלות הקנייה - הזדמנות מעולה להוסיף כסף (DCA)"
-            else:
-                suggestion = "🛡️ להשאיר את הכסף בנכס - המגמה תקינה"
-
-            results.append({
-                "סימול": ticker,
-                "כמות": units,
-                "מחיר קנייה ממוצע ($)": round(cost / units, 2) if units > 0 else 0,
-                "עלות כוללת ($)": round(cost, 2),
-                "מחיר אחרון ($)": round(current, 2) if np.isfinite(current) else "לא זמין",
-                "שווי נוכחי ($)": round(value, 2) if np.isfinite(value) else "לא זמין",
-                "רווח/הפסד ($)": round(pnl, 2) if np.isfinite(pnl) else "לא זמין",
-                "תשואה (%)": f"{pnl_pct:+.2f}%" if np.isfinite(pnl_pct) else "לא זמין",
-                "המלצה חכמה לפוזיציה": suggestion
-            })
+        results.append({
+            "מזהה": tx_id,
+            "תאריך": tx_date,
+            "נכס/מדד": ticker,
+            "סכום שהושקע ($)": round(cost, 2),
+            "מחיר קנייה ($)": round(buy_price, 2),
+            "מחיר נוכחי בלייב ($)": round(current, 2) if np.isfinite(current) else "לא זמין",
+            "שווי עדכני ($)": round(value, 2) if np.isfinite(value) else "לא זמין",
+            "רווח/הפסד ($)": round(pnl, 2) if np.isfinite(pnl) else "לא זמין",
+            "תשואה (%)": f"{pnl_pct:+.2f}%" if np.isfinite(pnl_pct) else "לא זמין",
+            "המלצת פעולה חכמה": suggestion
+        })
 
     return pd.DataFrame(results)
 
 
 # =====================================================
-# SIDEBAR NAVIGATION (INCLUDES THE 2 REQUIRED BUTTONS)
+# SIDEBAR NAVIGATION
 # =====================================================
 
 st.sidebar.title("📊 MARKET RADAR")
-st.sidebar.caption("מערכת השקעות וניתוח חכם בדולרים ($)")
+st.sidebar.caption("מערכת ניתוח וניהול השקעות בלייב ($)")
 
 page = st.sidebar.radio(
-    "ניווט באפליקציה",
+    "ניווט במערכת",
     [
         "סקירת שוק חכמה",
-        "המלצות Top 5 יומיות",         # <-- כפתור 1 מבוקש
-        "תיק השקעות והמלצות",          # <-- כפתור 2 מבוקש (ניהול תיקים עם סכומי כניסה והמלצות)
+        "המלצות Top 5 יומיות",
+        "תיק השקעות והמלצות",
         "קרנות ממונפות",
         "ניתוח מדדים",
         "תמחור ומחירים",
@@ -381,12 +374,12 @@ page = st.sidebar.radio(
     ]
 )
 
-if st.sidebar.button("🔄 רענון נתונים"):
+if st.sidebar.button("🔄 רענון נתונים בלייב"):
     st.cache_data.clear()
     st.rerun()
 
 st.sidebar.markdown("---")
-st.sidebar.caption("כל הנתונים המוצגים מחושבים בדולרים ($).")
+st.sidebar.caption("כל הנתונים מחושבים ומוצגים בדולרים ($).")
 
 
 # =====================================================
@@ -396,7 +389,7 @@ st.sidebar.caption("כל הנתונים המוצגים מחושבים בדולר
 if page == "סקירת שוק חכמה":
 
     st.title("🌎 סקירת שוק ותזמון כניסה חכם")
-    st.markdown("כלי זה משקלל את כל המדדים והפרמטרים כדי לקבוע האם המחיר כרגע אטרקטיבי לכניסה.")
+    st.markdown("שקלול של מחירי המדדים, ממוצעים נעים, RSI ומדד הפחד להחלטה האם השוק אטרקטיבי כרגע.")
 
     assets = {
         "S&P 500 (SPY)": "SPY",
@@ -427,144 +420,183 @@ if page == "סקירת שוק חכמה":
 
     score, factors, verdict = calculate_market_score(sp_df, vix_value)
 
-    st.subheader("🎯 מדד תנאי שוק משולב (האם המחיר כרגע זול/כדאי?)")
+    st.subheader("🎯 מדד תנאי שוק משולב")
 
     if score is not None:
         col_a, col_b = st.columns([1, 2])
         with col_a:
-            st.metric("ציון תנאי שוק", f"{score}/100")
+            st.metric("ציון אטרקטיביות שוק", f"{score}/100")
             st.progress(int(score))
         with col_b:
             st.markdown(f"### {verdict}")
-            st.caption("הציון נגזר משקלול של: מחירי המדד ביחס לממוצעים, מדד הפחד VIX, והמומנטום בשוק.")
+            st.caption("משקלל ממוצעים נעים, מדד הפחד VIX, מומנטום RSI ותרחישי ירידה מהשיא.")
 
         st.markdown("---")
-        st.subheader("פירוט הגורמים ששוקללו למדד:")
+        st.subheader("פירוט הניתוח המשוקלל:")
         st.dataframe(
-            pd.DataFrame([{"גורם בשוק": k, "ציון חיוביות (0-100)": v} for k, v in factors.items()]),
+            pd.DataFrame([{"פרמטר נבדק": k, "ציון חיוביות (0-100)": v} for k, v in factors.items()]),
             use_container_width=True
         )
     else:
         st.warning("אין מספיק נתונים לחישוב מדד השוק כרגע.")
 
     st.divider()
-    price_chart(sp_df, "גרף מחיר S&P 500 ($) עם ממוצעים נעים")
+    price_chart(sp_df, "גרף מחיר S&P 500 ($) מול ממוצעים נעים")
 
 
 # =====================================================
-# 2. DAILY TOP 5 RECOMMENDATIONS (DYNAMIC & WEIGHTED)
+# 2. DAILY TOP 5 RECOMMENDATIONS (COMPREHENSIVE ANALYSIS)
 # =====================================================
 
 elif page == "המלצות Top 5 יומיות":
 
-    st.title("⭐ המלצות Top 5 יומיות מתחלפות להשקעה")
-    st.markdown("רשימת 5 מניות, מדדים וקרנות סל מובילים שנסרקים ומדורגים על סמך שקלול חכם של מומנטום RSI, ממוצעים נעים והנחות מחיר זמניות בשוק.")
+    st.title("⭐ המלצות Top 5 יומיות להשקעה")
+    st.markdown("סריקה ומשקלל רחב של מדדים, קרנות סל ומניות מובילות. המערכת מנתחת את מכלול הפרמטרים ומציגה מדי יום את 5 המובילים בציון האטרקטיביות.")
 
-    top_candidates = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "AMD", "TSLA"]
-    
+    # סל מקיף של נכסים מובילים לבחינה יומיות
+    scan_pool = [
+        {"name": "S&P 500 ETF", "ticker": "SPY"},
+        {"name": "Nasdaq 100 ETF", "ticker": "QQQ"},
+        {"name": "Apple", "ticker": "AAPL"},
+        {"name": "Microsoft", "ticker": "MSFT"},
+        {"name": "Nvidia", "ticker": "NVDA"},
+        {"name": "Alphabet (Google)", "ticker": "GOOGL"},
+        {"name": "Amazon", "ticker": "AMZN"},
+        {"name": "Meta", "ticker": "META"},
+        {"name": "AMD", "ticker": "AMD"},
+        {"name": "Tesla", "ticker": "TSLA"}
+    ]
+
     analyzed_list = []
-    for ticker in top_candidates:
-        df = get_history(ticker, "6m")
-        tech = technical(df)
-        if tech and tech.get("rsi") is not None:
-            rsi = tech["rsi"]
-            price = tech["price"]
-            ma50 = tech["ma50"]
+    with st.spinner("מבצע ניתוח ומשקלל נתונים עבור כל הנכסים..."):
+        for item in scan_pool:
+            ticker = item["ticker"]
+            df = get_history(ticker, "6m")
+            tech = technical(df)
             
-            if ma50 and price > ma50 * 0.90:
-                attractiveness = (100 - rsi) if rsi < 60 else rsi * 0.4
+            if tech and tech.get("rsi") is not None:
+                rsi = tech["rsi"]
+                price = tech["price"]
+                ma50 = tech.get("ma50", price)
+                ma200 = tech.get("ma200", price)
+                month_change = tech.get("month", 0)
+
+                # חישוב ציון אטרקטיביות משוקלל רחב
+                score = 50.0  # ציון בסיס
+
+                # 1. רכיב RSI (מחיר זול / מכירת יתר)
+                if rsi < 40:
+                    score += 35
+                elif rsi < 55:
+                    score += 20
+                elif rsi > 70:
+                    score -= 25
+
+                # 2. רכיב מגמה (מחיר ביחס לממוצע 50 ו-200)
+                if price > ma200:
+                    score += 15  # מגמת עליה ראשית
+                if price > ma50:
+                    score += 10
+
+                # 3. רכיב הנחה (תיקון זמני במחיר מעניק הזדמנות)
+                if month_change is not None and month_change < -2:
+                    score += 15
+
+                # הגדרת המלצת איכות בעברית
+                if score >= 75:
+                    rec = "🟢 מומלץ מאוד לבדיקה (מחיר זול ומומנטום איסוף)"
+                elif score >= 60:
+                    rec = "🟡 מחיר נוח וסביר, מומלצת כניסה מדורגת"
+                else:
+                    rec = "🟠 במחיר יקר יחסית, מומלץ להמתין לתיקון"
+
                 analyzed_list.append({
-                    "סימול": ticker,
+                    "נכס / מדד": f"{item['name']} ({ticker})",
                     "מחיר נוכחי ($)": round(price, 2),
                     "RSI (מומנטום)": round(rsi, 1),
-                    "שינוי חודשי (%)": f"{tech.get('month', 0):+.2f}%" if tech.get('month') is not None else "N/A",
-                    "ציון אטרקטיביות": round(attractiveness, 1),
-                    "המלצת מערכת": "🟢 מומלץ לבדיקה והשקעה (מחיר נוח ומומנטום טוב)" if rsi < 55 else "🟡 במחיר סביר, מומלץ כניסה מדורגת"
+                    "שינוי חודשי (%)": f"{month_change:+.2f}%" if month_change is not None else "N/A",
+                    "ציון אטרקטיביות": round(score, 1),
+                    "המלצת המערכת": rec
                 })
 
     if analyzed_list:
         df_top = pd.DataFrame(analyzed_list).sort_values(by="ציון אטרקטיביות", ascending=False).head(5)
         st.dataframe(df_top.drop(columns=["ציון אטרקטיביות"]), use_container_width=True)
-        st.info("💡 רשימה זו מתעדכנת ומתחלפת באופן דינמי בהתאם לנתוני המסחר והשקלול המשולב.")
+        st.info("💡 רשימת ה-Top 5 נבחרת ומתעדכנת מדי יום אוטומטית מתוך ניתוח מלא של כל הנכסים בסל.")
     else:
-        st.warning("לא נמצאו מספיק נתונים להצגת הטופ 5 כרגע.")
+        st.warning("לא התקבלו נתונים מספיקים לסריקה. לחץ על 'רענון נתונים בלייב' בסרגל הצד.")
 
 
 # =====================================================
-# 3. PORTFOLIO & SMART RECOMMENDATIONS (PORTFOLIO MANAGEMENT)
+# 3. PORTFOLIO MANAGEMENT (EASY 4-FIELD FORM)
 # =====================================================
 
 elif page == "תיק השקעות והמלצות":
 
-    st.title("💼 ניהול תיק השקעות חכם בדולרים ($)")
-    st.markdown("הזן את עסקאות הרכישה שלך עם סכום וכמות. הנתונים נשמרים במסד הנתונים ומתעדכנים אוטומטית מול מחירי השוק החיים, כולל המלצות ניהול אישיות.")
+    st.title("💼 ניהול תיק השקעות והמלצות בזמן אמת")
+    st.markdown("הזן את ההשקעות שלך בצורה פשוטה. הנתונים יישמרו ויתעדכנו בלייב מול מחירי השוק עם המלצות פעולה.")
 
-    with st.form("add_transaction"):
+    # טופס פשוט - 4 שדות בלבד!
+    with st.form("simple_add_form"):
+        st.subheader("➕ הוספת השקעה חדשה לתיק")
         col1, col2 = st.columns(2)
+        
         with col1:
-            ticker = st.text_input("סימול הנכס (למשל: SPY, QQQ, AAPL)", "SPY").upper()
-            action = st.selectbox("פעולה", ["קנייה", "מכירה"])
-            quantity = st.number_input("כמות יחידות", min_value=0.000001, value=10.0)
+            ticker = st.selectbox(
+                "בחר מדד / נכס להשקעה",
+                ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA"]
+            )
+            tx_date = st.date_input("תאריך השקעה", date.today())
+            
         with col2:
-            price = st.number_input("מחיר קנייה ליחידה בדולרים ($)", min_value=0.0, value=450.0)
-            fee = st.number_input("עמלה בדולרים ($)", min_value=0.0, value=0.0)
-            tx_date = st.date_input("תאריך עסקה", date.today())
+            total_invested = st.number_input("סכום ההשקעה הכולל בדולרים ($)", min_value=1.0, value=1000.0, step=100.0)
+            buy_price = st.number_input("מחיר הקנייה ליחידה ($) (כמה השער היה כשרכשת)", min_value=0.1, value=500.0, step=1.0)
 
-        notes = st.text_input("הערות אישיות")
-        submit = st.form_submit_button("שמור עסקה בתיק")
+        notes = st.text_input("הערה חופשית (אופציונלי)")
+        submit = st.form_submit_button("שמור השקעה בתיק")
 
         if submit:
-            if ticker and quantity > 0 and price > 0:
-                add_transaction(tx_date, ticker, action, quantity, price, fee, "USD", notes)
-                st.success("העסקה נוספה בהצלחה ונשמרה בתיק!")
-                st.rerun()
+            add_transaction(tx_date, ticker, total_invested, buy_price, notes)
+            st.success(f"השקעה ב-{ticker} על סך ${total_invested:,.2f} נשמרה בהצלחה!")
+            st.rerun()
 
     tx = load_transactions()
 
     if not tx.empty:
         st.divider()
-        st.subheader("📋 היסטוריית עסקאות שמורות")
-        st.dataframe(tx, use_container_width=True)
-
-        st.download_button(
-            "הורדת עסקאות כקובץ CSV",
-            tx.to_csv(index=False).encode("utf-8-sig"),
-            "my_portfolio_transactions.csv",
-            "text/csv"
-        )
-
         positions = calculate_positions(tx)
 
-        st.subheader("📊 פוזיציות פתוחות מעודכנות והמלצות חכמות")
+        st.subheader("📊 ההשקעות שלך ומצב התיק המעודכן (בלייב)")
+        st.dataframe(positions, use_container_width=True)
 
-        if not positions.empty:
-            st.dataframe(positions, use_container_width=True)
+        valid_vals = positions.dropna(subset=["שווי עדכני ($)"])
+        if not valid_vals.empty:
+            total_cost = positions["סכום שהושקע ($)"].sum()
+            total_val = positions["שווי עדכני ($)"].sum()
+            total_pnl = total_val - total_cost
+            total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else 0
 
-            total_profit = positions["רווח/הפסד ($)"].sum() if "רווח/הפסד ($)" in positions.columns else 0
-            total_value = positions["שווי נוכחי ($)"].sum() if "שווי נוכחי ($)" in positions.columns else 0
-
-            col_p1, col_p2 = st.columns(2)
-            col_p1.metric("שווי כולל של התיק ($)", money(total_value))
-            col_p2.metric("סך רווח / הפסד בתיק ($)", money(total_profit))
-
-            valid = positions.dropna(subset=["שווי נוכחי ($)"])
-            if not valid.empty:
-                fig = go.Figure(data=[go.Pie(labels=valid["סימול"], values=valid["שווי נוכחי ($)"], hole=0.45)])
-                fig.update_layout(title="פיזור נכסים בתיק ($)", template="plotly_white", paper_bgcolor="#ffffff", plot_bgcolor="#ffffff")
-                st.plotly_chart(fig, use_container_width=True)
+            c1, c2, c3 = st.columns(3)
+            c1.metric("סך הכל הושקע ($)", money(total_cost))
+            c2.metric("שווי התיק כיום ($)", money(total_val))
+            c3.metric("סך רווח / הפסד ($)", money(total_pnl), f"{total_pnl_pct:+.2f}%")
 
         st.divider()
-        st.subheader("מחיקת עסקה מההיסטוריה")
-        delete_id = st.number_input("מספר מזהה (ID) של העסקה למחיקה", min_value=0, step=1)
-        if st.button("מחק עסקה"):
-            if delete_id:
+        st.subheader("🛠️ עריכה / מחיקת השקעות")
+        col_del1, col_del2 = st.columns([2, 1])
+        with col_del1:
+            delete_id = st.number_input("הזן מספר מזהה (ID) של השקעה למחיקה", min_value=1, step=1)
+        with col_del2:
+            st.write("")
+            st.write("")
+            if st.button("מחק השקעה"):
                 with connect_db() as con:
                     con.execute("DELETE FROM transactions WHERE id=?", (int(delete_id),))
-                st.success("העסקה נמחקה בהצלחה מהתיק.")
+                st.success(f"השקעה מס' {delete_id} נמחקה.")
                 st.rerun()
 
     else:
-        st.info("עדיין לא הוזנו עסקאות לתיק. התחל להזין למעלה כדי לראות את הפוזיציות שלך ואת ההמלצות החכמות.")
+        st.info("עדיין לא הוזנו השקעות. הזן את ההשקעה הראשונה שלך למעלה כדי להתחיל לעקוב!")
 
 
 # =====================================================
@@ -574,7 +606,7 @@ elif page == "תיק השקעות והמלצות":
 elif page == "קרנות ממונפות":
 
     st.title("⚡ ניתוח והמלצות על קרנות ממונפות")
-    st.warning("⚠️ אזהרה: קרנות ממונפות (2x או 3x) מתאימות למשקיעים מתקדמים ומגדילות תנודתיות ושחיקה.")
+    st.warning("⚠️ קרנות ממונפות (2x/3x) מיועדות למשקיעים המודעים לסיכון השחיקה בתקופות תנודתיות.")
 
     lev_tickers = {
         "TQQQ (3x Nasdaq - טכנולוגיה ממונפת)": "TQQQ",
@@ -583,7 +615,7 @@ elif page == "קרנות ממונפות":
         "SSO (2x S&P 500 - ממונף מתון)": "SSO"
     }
 
-    selected_lev = st.selectbox("בחר קרנות ממונפות לבדיקה", list(lev_tickers.keys()))
+    selected_lev = st.selectbox("בחר קרן ממונפת לבדיקה", list(lev_tickers.keys()))
     ticker_symbol = lev_tickers[selected_lev]
 
     df_lev = get_history(ticker_symbol, "1y")
@@ -592,18 +624,18 @@ elif page == "קרנות ממונפות":
     if not df_lev.empty and tech_lev:
         col1, col2, col3 = st.columns(3)
         col1.metric("מחיר נוכחי", f"${tech_lev['price']:,.2f}")
-        col2.metric("תנודתיות שנתית (סיכון)", f"{tech_lev['volatility']:.1f}%")
+        col2.metric("תנודתיות שנתית", f"{tech_lev['volatility']:.1f}%")
         col3.metric("ירידה מהשיא", f"{tech_lev['drawdown']:.1f}%")
 
         st.divider()
-        st.subheader("🤖 ניתוח מצב ומומלצות לקרן ממונפות זו:")
+        st.subheader("🤖 המלצת המערכת לקרן ממונפת זו:")
         
-        if tech_lev["price"] > tech_lev.get("ma200", 0) and tech_lev.get("rsi", 50) < 65:
-            st.success(f"**המלצה: כניסה זהירה אפשרית.** הנכס מעל ממוצע 200 (מגמת עליה חיובית ראשית).")
-        elif tech_lev.get("rsi", 50) > 70:
-            st.warning(f"**המלצה: לא להיכנס עכשיו.** RSI גבוה מאוד (קנוי יתר).")
+        if tech_lev["price"] > tech_lev.get("ma200", 0) and tech_lev.get("rsi", 50) < 62:
+            st.success("**המלצה: כניסה זהירה אפשרית.** המגמה מעל ממוצע 200 וה-RSI אינו קנוי יתר.")
+        elif tech_lev.get("rsi", 50) > 68:
+            st.warning("**המלצה: לא להיכנס כעת.** RSI גבוה מאוד (סיכון לתיקון חד).")
         else:
-            st.error(f"**המלצה: סיכון גבוה כרגע.** המגמה מעורבת או מתחת לממוצעים.")
+            st.error("**המלצה: סיכון מוגבר.** מומלץ להמתין להתייצבות השוק.")
 
         price_chart(df_lev, f"ביצועי {ticker_symbol} בדולרים ($)")
     else:
@@ -635,11 +667,6 @@ elif page == "ניתוח מדדים":
             cols[0].metric("RSI (מומנטום)", money(t["rsi"], ""))
             cols[1].metric("תנודתיות שנתית", f"{t['volatility']:.2f}%")
             cols[2].metric("ירידה מהשיא", f"{t['drawdown']:.2f}%")
-
-            cols2 = st.columns(3)
-            cols2[0].metric("שינוי יומי", f"{t['change']:+.2f}%")
-            cols2[1].metric("תשואה חודשית", f"{t['month']:+.2f}%" if t["month"] is not None else "לא זמין")
-            cols2[2].metric("תשואה רבעונית", f"{t['quarter']:+.2f}%" if t["quarter"] is not None else "לא זמין")
     else:
         st.error("לא התקבלו נתונים עבור המדד הנבחר.")
 
@@ -650,18 +677,16 @@ elif page == "ניתוח מדדים":
 
 elif page == "תמחור ומחירים":
 
-    st.title("💰 תמחור נכסים מרכזיים")
+    st.title("💰 תמחור נכסים מובילים")
 
-    ticker = st.selectbox("בחר קרן סל או מניה מובילה", ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL"])
+    ticker = st.selectbox("בחר נכס", ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL"])
     info = get_info(ticker)
 
     fields = {
         "מכפיל רווח נוכחי (Trailing P/E)": "trailingPE",
         "מכפיל רווח עתידי (Forward P/E)": "forwardPE",
         "יחס מחיר להון (Price to Book)": "priceToBook",
-        "שולי רווח (Profit Margin)": "profitMargins",
-        "תחזית מחיר ממוצעת מאנליסטים": "targetMeanPrice",
-        "תחזית מחיר גבוהה מאנליסטים": "targetHighPrice"
+        "תחזית מחיר ממוצעת מאנליסטים": "targetMeanPrice"
     }
 
     rows = []
@@ -676,7 +701,6 @@ elif page == "תמחור ומחירים":
         rows.append({"נתון פיננסי": label, "ערך": value})
 
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
-    st.info("💡 כל המחירים והתחזיות מוצגים בדולרים ($).")
 
 
 # =====================================================
@@ -717,14 +741,8 @@ elif page == "חדשות":
 
     st.title("📰 חדשות שוק ההון")
 
-    topics = {
-        "כלכלה אמריקאית ושווקים": "US stock market economy",
-        "ריבית ואינפלציה": "Federal Reserve inflation interest rates",
-        "טכנולוגיה ובינה מלאכותית": "technology AI stocks"
-    }
-
-    topic = st.selectbox("בחר נושא חדשותי", list(topics))
-    articles = get_news(topics[topic])
+    topic = st.selectbox("בחר נושא", ["US stock market economy", "Federal Reserve inflation", "technology AI stocks"])
+    articles = get_news(topic)
 
     if articles:
         for article in articles:
@@ -744,18 +762,15 @@ elif page == "חדשות":
 
 elif page == "ניהול סיכונים":
 
-    st.title("⚠️ ניהול סיכונים ותרחישי קיצון")
-    st.markdown("בדיקת השפעת תרחישי ירידה בשוק על התיק שלך (במונחי דולרים).")
-
-    capital = st.number_input("הערך הכולל של תיק ההשקעות שלך ($)", min_value=0.0, value=10000.0, step=1000.0)
+    st.title("⚠️ ניהול סיכונים ותרחישי ירידה")
+    capital = st.number_input("שווי תיק היפותטי ($)", min_value=0.0, value=10000.0, step=1000.0)
 
     scenarios = [-5, -10, -20, -30, -40]
     scenario_df = pd.DataFrame({
-        "תרחיש ירידה בשוק": [f"ירידה של {abs(x)}%" for x in scenarios],
-        "הפסד כספי מוערך ($)": [round(capital * abs(x) / 100, 2) for x in scenarios],
-        "שווי התיק לאחר הירידה ($)": [round(capital * (1 + x / 100), 2) for x in scenarios]
+        "תרחיש ירידה": [f"ירידה של {abs(x)}%" for x in scenarios],
+        "הפסד מוערך ($)": [round(capital * abs(x) / 100, 2) for x in scenarios],
+        "שווי התיק לאחר ירידה ($)": [round(capital * (1 + x / 100), 2) for x in scenarios]
     })
-
     st.dataframe(scenario_df, use_container_width=True)
 
 
@@ -766,7 +781,6 @@ elif page == "ניהול סיכונים":
 elif page == "Backtesting":
 
     st.title("🧪 בדיקת ביצועים היסטוריים (Backtesting)")
-
     ticker = st.selectbox("בחר נכס לבדיקה", ["SPY", "QQQ"])
     
     df_bt = get_history(ticker, "5y")
@@ -784,15 +798,10 @@ elif page == "Backtesting":
         model = 10000 * (1 + model_returns).cumprod()
 
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=close_bt.index, y=buy_hold, name="החזקה רגילה (Buy & Hold)", line=dict(color="#2563eb")))
-        fig.add_trace(go.Scatter(x=close_bt.index, y=model, name="אסטרטגיית ממוצעים נעים", line=dict(color="#059669")))
-
-        fig.update_layout(title=f"השוואת תשואה היסטורית על סך $10,000 עבור {ticker}", template="plotly_white", height=450, paper_bgcolor="#ffffff", plot_bgcolor="#ffffff")
+        fig.add_trace(go.Scatter(x=close_bt.index, y=buy_hold, name="Buy & Hold", line=dict(color="#2563eb")))
+        fig.add_trace(go.Scatter(x=close_bt.index, y=model, name="אסטרטגיית ממוצעים", line=dict(color="#059669")))
+        fig.update_layout(template="plotly_white", height=450, paper_bgcolor="#ffffff", plot_bgcolor="#ffffff")
         st.plotly_chart(fig, use_container_width=True)
-
-        c1, c2 = st.columns(2)
-        c1.metric("שווי סופי בשיטת החזקה רגילה", f"${buy_hold.iloc[-1]:,.2f}")
-        c2.metric("שווי סופי בשיטת ממוצעים נעים", f"${model.iloc[-1]:,.2f}")
     else:
         st.warning("אין מספיק נתונים היסטוריים לביצוע הבדיקה.")
 
@@ -802,4 +811,4 @@ elif page == "Backtesting":
 # =====================================================
 
 st.markdown("---")
-st.caption("Market Radar | כלי מתקדם לניתוח שוק והשקעות בדולרים ($). התוכן הינו לימודי ואינו מהווה ייעוץ השקעות פיננסי.")
+st.caption("Market Radar | כלי לניתוח וניהול השקעות בלייב ($). התוכן אינו מהווה ייעוץ השקעות פיננסי.")
