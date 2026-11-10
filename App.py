@@ -9,7 +9,7 @@ from datetime import date
 from io import StringIO
 
 # =====================================================
-# MARKET RADAR - FULL PROFESSIONAL VERSION (10 TABS)
+# MARKET RADAR PRO - ULTIMATE INVESTMENT DASHBOARD
 # =====================================================
 
 st.set_page_config(
@@ -20,7 +20,7 @@ st.set_page_config(
 
 DB = "market_radar.db"
 
-# ---------------- PROFESSIONAL UI DESIGN ----------------
+# ---------------- PROFESSIONAL LIGHT UI DESIGN ----------------
 
 st.markdown("""
 <style>
@@ -86,7 +86,7 @@ def init_db():
 init_db()
 
 
-# ---------------- DATA SOURCES & LIVE PRICES ----------------
+# ---------------- ROBUST DATA SOURCES ----------------
 
 @st.cache_data(ttl=60)
 def get_history(ticker, period="1y"):
@@ -253,6 +253,7 @@ def calculate_positions(tx):
         close = close_series(df)
         current = float(close.iloc[-1]) if not close.empty else np.nan
         
+        # חישוב אוטומטי של כמות יחידות אם לא הוזנו בצורה תקינה
         if units <= 0 and buy_price > 0 and cost > 0:
             units = cost / buy_price
         elif units <= 0 and current > 0 and cost > 0:
@@ -276,6 +277,7 @@ def calculate_positions(tx):
         rsi = tech.get("rsi", 50.0)
         ma200 = tech.get("ma200", current)
         
+        # מנוע המלצות אקטיבי מבוסס תנאי שוק
         if pnl_pct > 20 or (rsi > 72 and pnl_pct > 10):
             suggestion = "🔴 למכור ולמימוש רווחים: הנכס הגיע ליעד רווח גבוה או נמצא במצב קנוי-יתר (RSI > 72)."
         elif pnl_pct < -10 and (rsi < 45 or vix_val > 22):
@@ -305,7 +307,7 @@ def calculate_positions(tx):
 
 
 # =====================================================
-# SIDEBAR NAVIGATION (ALL 10 PAGES)
+# SIDEBAR NAVIGATION
 # =====================================================
 
 st.sidebar.title("📊 MARKET RADAR PRO")
@@ -336,12 +338,12 @@ st.sidebar.caption("הנתונים מתעדכנים ישירות משערי הש
 
 
 # =====================================================
-# 1. PORTFOLIO MANAGEMENT
+# 1. PORTFOLIO MANAGEMENT (MAIN)
 # =====================================================
 
 if page == "תיק השקעות והמלצות":
     st.title("💼 ניהול תיק השקעות והמלצות חכמות מעמיקות")
-    st.markdown("כאן תוכל לנהל את התיק שלך. השדות נקיים לחלוטין להזנה נוחה. המערכת שולפת את שערי השוק בלייב ומנתחת את התיק לעומק.")
+    st.markdown("כאן תוכל לנהל את התיק שלך. המערכת שולפת שערי שוק חיים בדולרים, מחשבת תשואות בלייב ומציגה ניתוח מלא והמלצות.")
 
     tab_add, tab_edit, tab_view = st.tabs(["➕ הוספת השקעה", "✏️ עריכה ומחיקה", "📋 צפייה וניתוח התיק"])
 
